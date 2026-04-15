@@ -10,7 +10,7 @@ type Props = {
 };
 
 const badgeClass = {
-  "!": "bg-yellow-400 text-black",
+  "!": "animate-pulse bg-yellow-400 text-black",
   "✓": "bg-emerald-500 text-black",
 } as const;
 
