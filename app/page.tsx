@@ -20,6 +20,7 @@ import UsageTracker from "@/components/usage/UsageTracker";
 import SpriteBubble from "@/components/sprite-bubble/SpriteBubble";
 import MeetingModal from "@/components/war-room/MeetingModal";
 import ChatDock, { DockTabsProvider } from "@/components/dock/ChatDock";
+import { useDockTabs } from "@/hooks/useDockTabs";
 
 const offices: Record<string, OfficeConfig> = {
   paradise: paradiseRaw as OfficeConfig,
@@ -32,6 +33,16 @@ type OfficeSlug = (typeof order)[number];
 const ROSTER_POLL_MS = 5_000;
 
 export default function Home() {
+  return (
+    <DockTabsProvider>
+      <HomeInner />
+    </DockTabsProvider>
+  );
+}
+
+function HomeInner() {
+  const { openOrFocus } = useDockTabs();
+
   // The office whose sidebar + roster data is shown. Always a real slug (never null).
   const [sidebarSlug, setSidebarSlug] = useState<OfficeSlug>("paradise");
   // Whether the Pixi camera is focused on a module or in overview.
@@ -220,17 +231,32 @@ export default function Home() {
       deskId: string,
       clientX: number,
       clientY: number,
+      shiftKey?: boolean,
     ) => {
       const slug = officeSlug as OfficeSlug;
-      // If clicking an agent in a different office than the current sidebar,
-      // switch sidebar context first so the inspector/roster query the right server.
+      // Keep sidebar context in sync
       if (slug !== sidebarSlug) {
         setSidebarSlug(slug);
         localStorage.setItem("ri-office", slug);
       }
       const kind = agentStatus.get(deskId);
+      const agent = agentByDesk.get(deskId);
+
+      // Shift+click → quick-cast bubble (task mode)
+      if (shiftKey) {
+        if (!agent) return;
+        setBubble({
+          deskId,
+          officeSlug: slug,
+          x: clientX,
+          y: clientY,
+          mode: "task",
+        });
+        return;
+      }
+
+      // Awaiting input → reply bubble
       if (kind === "awaiting_input") {
-        selectDesk(deskId, slug);
         setBubble({
           deskId,
           officeSlug: slug,
@@ -241,23 +267,20 @@ export default function Home() {
         });
         return;
       }
-      if (kind === "done_unacked") {
-        selectDesk(deskId, slug);
-        setBubble(null);
-        return;
-      }
-      const agent = agentByDesk.get(deskId);
+
+      // All other clicks → open/focus dock tab
       if (!agent) return;
-      selectDesk(deskId, slug);
-      setBubble({
+      const agentConfig = offices[slug]?.agents.find((a) => a.deskId === deskId);
+      openOrFocus({
+        id: agent.id,
+        agentId: agent.id,
         deskId,
         officeSlug: slug,
-        x: clientX,
-        y: clientY,
-        mode: "task",
+        kind: "1:1",
+        label: agentConfig?.name ?? deskId,
       });
     },
-    [agentStatus, agentByDesk, runByDesk, selectDesk, sidebarSlug],
+    [agentStatus, agentByDesk, runByDesk, sidebarSlug, openOrFocus],
   );
 
   const handleDeskDrop = useCallback(
@@ -396,7 +419,6 @@ export default function Home() {
   }, []);
 
   return (
-    <DockTabsProvider>
     <div className="flex h-screen w-screen flex-col bg-black text-white">
       <header className="flex items-center justify-between border-b border-white/10 px-4 py-2 text-sm">
         <div className="font-mono tracking-tight">robots-in-a-house</div>
@@ -512,6 +534,5 @@ export default function Home() {
         onFocusAgent={(deskId) => selectDesk(deskId)}
       />
     </div>
-    </DockTabsProvider>
   );
 }

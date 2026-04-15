@@ -8,10 +8,7 @@ import {
   useDockTabs,
 } from "@/hooks/useDockTabs";
 import TabStrip from "@/components/dock/TabStrip";
-
-// Lazy imports — real tab content wired in step 3+
-// import ChatTab from "@/components/dock/ChatTab";
-// import NewChatPicker from "@/components/dock/NewChatPicker";
+import ChatTab from "@/components/dock/ChatTab";
 
 type Props = {
   /** All agents across all offices — passed down to NewChatPicker */
@@ -173,13 +170,14 @@ function InnerDockBody({
         </div>
       )}
 
-      {/* Active tab content — wired in step 3 */}
-      {focusedTab && !pickerOpen && (
-        <div className="flex min-h-0 flex-1 flex-col p-3">
-          <div className="font-mono text-xs text-white/40">
-            {focusedTab.label} — chat coming in step 3
-          </div>
-        </div>
+      {/* Active tab content */}
+      {focusedTab && !pickerOpen && focusedTab.kind === "1:1" && focusedTab.agentId && focusedTab.deskId && (
+        <ChatTab
+          officeSlug={focusedTab.officeSlug}
+          agentId={focusedTab.agentId}
+          deskId={focusedTab.deskId}
+          agentName={focusedTab.label}
+        />
       )}
     </div>
   );

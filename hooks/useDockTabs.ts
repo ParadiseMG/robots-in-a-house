@@ -14,6 +14,7 @@ export type TabBadge = "!" | "✓" | null;
 export type DockTab = {
   id: string; // unique tab id — agentId for 1:1, "war-room:{slug}" for war-room
   agentId: string | null; // null for war-room tabs
+  deskId: string | null; // null for war-room tabs
   officeSlug: string;
   kind: "1:1" | "war-room";
   pinned: boolean;
@@ -63,6 +64,7 @@ function reducer(state: State, action: Action): State {
       const newTab: DockTab = {
         id,
         agentId: null,
+        deskId: null,
         officeSlug: action.officeSlug,
         kind: "war-room",
         pinned: false,
