@@ -9,30 +9,37 @@ import {
 } from "@/hooks/useDockTabs";
 import TabStrip from "@/components/dock/TabStrip";
 import ChatTab from "@/components/dock/ChatTab";
+import WarRoomTab from "@/components/dock/WarRoomTab";
+import NewChatPicker from "@/components/dock/NewChatPicker";
+import type { OfficeConfig } from "@/lib/office-types";
+
+type RosterEntry = {
+  agent: { id: string; deskId: string };
+  current: {
+    runStatus: string | null;
+    acknowledgedAt: number | null;
+  } | null;
+};
+
+type AgentEntry = {
+  id: string;
+  name: string;
+  role: string;
+  deskId: string;
+  isReal: boolean;
+  officeSlug: string;
+};
 
 type Props = {
-  /** All agents across all offices — passed down to NewChatPicker */
-  agents?: Array<{
-    id: string;
-    name: string;
-    role: string;
-    deskId: string;
-    isReal: boolean;
-    officeSlug: string;
-  }>;
-  rosterEntries?: Array<{
-    agent: { id: string; deskId: string };
-    current: {
-      runStatus: string | null;
-      acknowledgedAt: number | null;
-    } | null;
-  }>;
+  agents?: AgentEntry[];
+  rosterEntries?: RosterEntry[];
+  offices?: Record<string, OfficeConfig>;
 };
 
 const MIN_HEIGHT = 120;
 const MAX_HEIGHT = 600;
 const DEFAULT_HEIGHT = 280;
-const COLLAPSED_HEIGHT = 36; // just the TabStrip
+const COLLAPSED_HEIGHT = 36;
 
 export function DockTabsProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useDockTabsState();
@@ -44,13 +51,12 @@ export function DockTabsProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
-export default function ChatDock({ agents = [], rosterEntries = [] }: Props) {
+export default function ChatDock({ agents = [], rosterEntries = [], offices = {} }: Props) {
   const [height, setHeight] = useState(DEFAULT_HEIGHT);
   const [collapsed, setCollapsed] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const dragRef = useRef<{ startY: number; startH: number } | null>(null);
 
-  // Drag-resize handle
   const onResizeMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     dragRef.current = { startY: e.clientY, startH: height };
@@ -86,14 +92,12 @@ export default function ChatDock({ agents = [], rosterEntries = [] }: Props) {
         />
       )}
 
-      {/* Tab strip */}
       <TabStrip
         collapsed={collapsed}
         onToggleCollapse={() => setCollapsed((v) => !v)}
         onOpenPicker={() => setPickerOpen((v) => !v)}
       />
 
-      {/* Body — hidden when collapsed */}
       {!collapsed && (
         <div className="flex min-h-0 flex-1 flex-col">
           <InnerDockBody
@@ -101,6 +105,7 @@ export default function ChatDock({ agents = [], rosterEntries = [] }: Props) {
             setPickerOpen={setPickerOpen}
             agents={agents}
             rosterEntries={rosterEntries}
+            offices={offices}
           />
         </div>
       )}
@@ -108,19 +113,26 @@ export default function ChatDock({ agents = [], rosterEntries = [] }: Props) {
   );
 }
 
-/** Reads context — separated so it can consume DockTabsContext */
 function InnerDockBody({
   pickerOpen,
   setPickerOpen,
   agents,
   rosterEntries,
+  offices,
 }: {
   pickerOpen: boolean;
   setPickerOpen: (v: boolean) => void;
-  agents: Props["agents"];
-  rosterEntries: Props["rosterEntries"];
+  agents: AgentEntry[];
+  rosterEntries: RosterEntry[];
+  offices: Record<string, OfficeConfig>;
 }) {
-  const { focusedTab, tabs } = useDockTabs();
+  const { focusedTab, tabs, openWarRoom } = useDockTabs();
+
+  const officeList = Object.values(offices).map((o) => ({
+    slug: o.slug,
+    name: o.name,
+    accent: o.theme.accent,
+  }));
 
   return (
     <div className="relative flex min-h-0 flex-1">
@@ -140,37 +152,20 @@ function InnerDockBody({
 
       {/* Picker overlay */}
       {pickerOpen && (
-        <div className="absolute inset-0 z-20 overflow-y-auto bg-zinc-950 p-3">
-          <div className="mb-2 flex items-center justify-between">
-            <span className="font-mono text-[10px] uppercase tracking-wider text-white/50">
-              agents
-            </span>
-            <button
-              type="button"
-              onClick={() => setPickerOpen(false)}
-              className="font-mono text-[10px] text-white/40 hover:text-white"
-            >
-              ✕
-            </button>
-          </div>
-          <div className="space-y-1">
-            {agents?.map((a) => (
-              <div
-                key={a.id}
-                className="flex items-center gap-2 rounded border border-white/10 bg-black/40 px-2 py-1.5"
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm text-white">{a.name}</div>
-                  <div className="truncate text-[10px] text-white/50">{a.role}</div>
-                </div>
-                <span className="font-mono text-[9px] text-white/30">{a.officeSlug}</span>
-              </div>
-            ))}
-          </div>
+        <div className="absolute inset-0 z-20 bg-zinc-950">
+          <NewChatPicker
+            agents={agents}
+            onClose={() => setPickerOpen(false)}
+            onConveneWarRoom={(slug) => {
+              const office = offices[slug];
+              openWarRoom(slug, office ? `${office.name} War Room` : "War Room");
+            }}
+            offices={officeList}
+          />
         </div>
       )}
 
-      {/* Active tab content */}
+      {/* Active 1:1 tab */}
       {focusedTab && !pickerOpen && focusedTab.kind === "1:1" && focusedTab.agentId && focusedTab.deskId && (
         <ChatTab
           officeSlug={focusedTab.officeSlug}
@@ -179,6 +174,21 @@ function InnerDockBody({
           agentName={focusedTab.label}
         />
       )}
+
+      {/* Active war-room tab */}
+      {focusedTab && !pickerOpen && focusedTab.kind === "war-room" && (() => {
+        const office = offices[focusedTab.officeSlug];
+        if (!office) return null;
+        return (
+          <WarRoomTab
+            key={focusedTab.id}
+            tabId={focusedTab.id}
+            officeSlug={focusedTab.officeSlug}
+            office={office}
+            roster={rosterEntries}
+          />
+        );
+      })()}
     </div>
   );
 }

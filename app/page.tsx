@@ -41,7 +41,7 @@ export default function Home() {
 }
 
 function HomeInner() {
-  const { openOrFocus } = useDockTabs();
+  const { openOrFocus, openWarRoom } = useDockTabs();
 
   // The office whose sidebar + roster data is shown. Always a real slug (never null).
   const [sidebarSlug, setSidebarSlug] = useState<OfficeSlug>("paradise");
@@ -449,7 +449,8 @@ function HomeInner() {
               onModuleFocus={(slug) => focusModule(slug as OfficeSlug)}
               onWarRoomClick={(slug) => {
                 if (slug === "paradise" || slug === "dontcall") {
-                  setMeetingOpen({ officeSlug: slug });
+                  const office = offices[slug];
+                  openWarRoom(slug, office ? `${office.name} War Room` : "War Room");
                 }
               }}
               showGrid={showGrid}
@@ -476,6 +477,7 @@ function HomeInner() {
           <ChatDock
             agents={allAgentsForDock}
             rosterEntries={rosterEntries ?? []}
+            offices={offices}
           />
           <PromptBar
             agents={sidebarOffice.agents}
