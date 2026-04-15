@@ -13,6 +13,7 @@ import {
   loadTilesheet,
   idleFramesForFacing,
 } from "@/lib/sprite-loader";
+import { isContextWarning } from "@/lib/model-context";
 
 type ModuleGeom = {
   officeSlug: string;
@@ -59,6 +60,8 @@ type Props = {
   onAgentHoverOut?: () => void;
   /** Fires whenever agent screen positions update (used for ambient bubbles) */
   onAgentPositions?: (positions: Map<string, { clientX: number; clientY: number }>) => void;
+  /** Map of agentId → {model, tokens} for context warning overlay */
+  contextUsage?: ReadonlyMap<string, { model: string | null; tokens: number }>;
   showGrid?: boolean;
 };
 
@@ -78,6 +81,7 @@ export default function Station({
   onAgentHover,
   onAgentHoverOut,
   onAgentPositions,
+  contextUsage,
   showGrid = false,
 }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -101,6 +105,8 @@ export default function Station({
   onAgentHoverOutRef.current = onAgentHoverOut;
   const onAgentPositionsRef = useRef(onAgentPositions);
   onAgentPositionsRef.current = onAgentPositions;
+  const contextUsageRef = useRef(contextUsage);
+  contextUsageRef.current = contextUsage;
   const showGridRef = useRef(showGrid);
   showGridRef.current = showGrid;
   const focusedRef = useRef<string | null>(focusedModule);
@@ -233,8 +239,11 @@ export default function Station({
         pip: InstanceType<typeof Graphics>;
         exclamation: InstanceType<typeof Graphics>;
         check: InstanceType<typeof Graphics>;
+        ctxWarning: InstanceType<typeof Text>;
         nameTag: InstanceType<typeof Container>;
         indicatorBaseY: number;
+        agentId: string;
+        model: string | null;
       };
 
       // Shared drag state — at most one agent dragging at a time across modules.
@@ -692,13 +701,32 @@ export default function Station({
           nameTag.zIndex = zBase + 7;
           furniture.addChild(nameTag);
 
+          // Context warning overlay (⚠) — shown when model ctx ≥ 80%
+          const ctxWarning = new Text({
+            text: "⚠",
+            style: new TextStyle({
+              fontFamily: "monospace",
+              fontSize: 11,
+              fill: 0xfbbf24,
+              stroke: { color: 0x000000, width: 2, join: "round" },
+            }),
+          });
+          ctxWarning.anchor.set(0.5, 0.5);
+          ctxWarning.position.set(agentCenterX + body.width * 0.3, indicatorBaseY + 10);
+          ctxWarning.zIndex = zBase + 8;
+          ctxWarning.visible = false;
+          furniture.addChild(ctxWarning);
+
           agentSprites.set(agent.id, {
             body,
             pip,
             exclamation,
             check,
+            ctxWarning,
             nameTag,
             indicatorBaseY,
+            agentId: agent.id,
+            model: agent.model ?? null,
           });
         }
 
@@ -1096,7 +1124,7 @@ export default function Station({
           }
         }
 
-        // Busy / status indicators
+        // Busy / status indicators + context warning
         const busySig = computeBusySig();
         const statusSig = computeStatusSig();
         if (busySig !== lastBusySig || statusSig !== lastStatusSig) {
@@ -1111,6 +1139,11 @@ export default function Station({
               sprites.exclamation.visible = kind === "awaiting_input";
               sprites.check.visible = kind === "done_unacked";
               sprites.pip.visible = busy && !kind;
+              // Context warning overlay
+              const ctxInfo = contextUsageRef.current?.get(agentId);
+              sprites.ctxWarning.visible = ctxInfo
+                ? isContextWarning(ctxInfo.model, ctxInfo.tokens)
+                : false;
             }
           }
         }

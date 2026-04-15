@@ -92,6 +92,54 @@ function HomeInner() {
   }, [rosterEntries]);
   const ambientLines = useAmbientStream(activeRuns, focusedTab?.agentId ?? null);
 
+  // Context usage for ⚠ overlay — poll inspector for running agents
+  const [contextUsage, setContextUsage] = useState<
+    ReadonlyMap<string, { model: string | null; tokens: number }>
+  >(new Map());
+
+  useEffect(() => {
+    const runningEntries = (rosterEntries ?? []).filter(
+      (e) => e.current?.runStatus === "running" || e.current?.runStatus === "starting",
+    );
+    if (runningEntries.length === 0) return;
+    let alive = true;
+    (async () => {
+      const updates = new Map<string, { model: string | null; tokens: number }>();
+      await Promise.all(
+        runningEntries.map(async (entry) => {
+          try {
+            const slug = order.find((s) => offices[s].agents.some((a) => a.id === entry.agent.id));
+            if (!slug) return;
+            const res = await fetch(
+              `/api/inspector?office=${encodeURIComponent(slug)}&deskId=${encodeURIComponent(entry.agent.deskId)}`,
+            );
+            if (!res.ok) return;
+            const json = (await res.json()) as {
+              agent: { model: string | null };
+              context: { tokens: number; limit: number; pct: number } | null;
+            };
+            if (json.context) {
+              updates.set(entry.agent.id, {
+                model: json.agent.model,
+                tokens: json.context.tokens,
+              });
+            }
+          } catch {
+            // ignore
+          }
+        }),
+      );
+      if (alive && updates.size > 0) {
+        setContextUsage((prev) => {
+          const next = new Map(prev);
+          for (const [k, v] of updates) next.set(k, v);
+          return next;
+        });
+      }
+    })();
+    return () => { alive = false; };
+  }, [rosterEntries]);
+
   // Restore sidebar slug + desk selection from localStorage on mount
   useEffect(() => {
     const stored = localStorage.getItem("ri-office") as OfficeSlug | null;
@@ -485,6 +533,7 @@ function HomeInner() {
               onAgentPositions={(positions) => {
                 agentPositionsRef.current = positions;
               }}
+              contextUsage={contextUsage}
               showGrid={showGrid}
             />
             <StationMinimap
