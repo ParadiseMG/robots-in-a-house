@@ -1,0 +1,180 @@
+{
+  "slug": "paradise",
+  "name": "Paradise",
+  "theme": {
+    "floor": "#3a2a4a",
+    "floorAlt": "#4a3560",
+    "wall": "#2a1838",
+    "deskTop": "#c97ab6",
+    "deskSide": "#8a4a7a",
+    "accent": "#ffb5e8",
+    "highlight": "#ffff6b",
+    "bg": "#1a0f24",
+    "premadeRoom": {
+      "layers": [
+        "paradise_japanese_lounge_layer1.png",
+        "paradise_japanese_lounge_layer2.png"
+      ],
+      "pixelWidth": 304,
+      "pixelHeight": 214,
+      "sourceTileSize": 16,
+      "characterDepthIndex": 2
+    }
+  },
+  "tile": {
+    "w": 48,
+    "h": 48
+  },
+  "grid": {
+    "cols": 19,
+    "rows": 14,
+    "_comment": "Source is 304x214 (19x13.375 tiles at 16px). Rows rounded up to 14 (224px) — ~10px padding at the bottom, source image anchors at (0,0) and may be slightly cropped at the far bottom edge. Cols are exact at 19."
+  },
+  "rooms": [
+    {
+      "id": "music-ops",
+      "name": "Music Ops",
+      "gridX": 1,
+      "gridY": 1,
+      "w": 5,
+      "h": 5,
+      "_comment": "Left seating cluster — sofas and low tables in source art around cols 1-5, rows 1-5"
+    },
+    {
+      "id": "ticketing",
+      "name": "Ticketing",
+      "gridX": 6,
+      "gridY": 1,
+      "w": 5,
+      "h": 5,
+      "_comment": "Center cluster — cushion/table grouping around cols 6-10, rows 3-5"
+    },
+    {
+      "id": "director",
+      "name": "Director",
+      "gridX": 12,
+      "gridY": 6,
+      "w": 6,
+      "h": 4,
+      "_comment": "Right side longer cluster — bookcase / display unit area around cols 12-17, rows 7-9"
+    }
+  ],
+  "desks": [
+    {
+      "id": "desk-melody",
+      "roomId": "music-ops",
+      "gridX": 12,
+      "gridY": 9,
+      "facing": "S",
+      "_comment": "Left cluster, upper-left table object at tile (2,2) in source art"
+    },
+    {
+      "id": "desk-beat",
+      "roomId": "music-ops",
+      "gridX": 3,
+      "gridY": 7,
+      "facing": "S",
+      "_comment": "Left cluster, lower-right of that grouping at (4,3)"
+    },
+    {
+      "id": "desk-gate",
+      "roomId": "ticketing",
+      "gridX": 4,
+      "gridY": 11,
+      "facing": "S",
+      "_comment": "Center cluster, left seat at (7,4)"
+    },
+    {
+      "id": "desk-stub",
+      "roomId": "ticketing",
+      "gridX": 7,
+      "gridY": 11,
+      "facing": "S",
+      "_comment": "Center cluster, right seat at (9,4)"
+    },
+    {
+      "id": "desk-maestro",
+      "roomId": "director",
+      "gridX": 7,
+      "gridY": 2,
+      "facing": "S",
+      "_comment": "Right cluster, long display/desk unit center at (14,8)"
+    }
+  ],
+  "agents": [
+    {
+      "id": "melody",
+      "deskId": "desk-melody",
+      "name": "Melody",
+      "role": "Music Ops",
+      "spritePack": "limezu/office/01",
+      "visual": {
+        "premade": "premade_15.png"
+      },
+      "isReal": true,
+      "cwd": "agent-workspaces/paradise/melody",
+      "allowedTools": [
+        "Read",
+        "Write",
+        "Edit",
+        "Grep",
+        "Glob",
+        "Bash"
+      ]
+    },
+    {
+      "id": "beat",
+      "deskId": "desk-beat",
+      "name": "Beat",
+      "role": "A&R",
+      "spritePack": "limezu/office/02",
+      "visual": {
+        "premade": "premade_03.png"
+      },
+      "isReal": false
+    },
+    {
+      "id": "gate",
+      "deskId": "desk-gate",
+      "name": "Gate",
+      "role": "Ticketing",
+      "spritePack": "limezu/office/03",
+      "visual": {
+        "premade": "premade_10.png"
+      },
+      "isReal": false
+    },
+    {
+      "id": "stub",
+      "deskId": "desk-stub",
+      "name": "Stub",
+      "role": "Guest List",
+      "spritePack": "limezu/office/04",
+      "visual": {
+        "premade": "premade_06.png"
+      },
+      "isReal": false
+    },
+    {
+      "id": "maestro",
+      "deskId": "desk-maestro",
+      "name": "Maestro",
+      "role": "Director",
+      "spritePack": "limezu/office/05",
+      "visual": {
+        "premade": "premade_08.png"
+      },
+      "isReal": true,
+      "cwd": "agent-workspaces/paradise/maestro",
+      "allowedTools": [
+        "Read",
+        "Write",
+        "Edit",
+        "Grep",
+        "Glob",
+        "Bash"
+      ],
+      "model": "claude-opus-4-6"
+    }
+  ]
+}

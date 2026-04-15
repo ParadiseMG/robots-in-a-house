@@ -1,0 +1,33 @@
+import { NextResponse } from "next/server";
+
+const RUNNER_URL = process.env.RUNNER_URL ?? "http://127.0.0.1:3100";
+
+export async function POST(req: Request) {
+  const body = (await req.json()) as {
+    assignmentId?: string;
+    agentId?: string;
+    officeSlug?: string;
+    prompt?: string;
+  };
+  if (!body.assignmentId || !body.agentId || !body.officeSlug || !body.prompt) {
+    return NextResponse.json({ error: "missing fields" }, { status: 400 });
+  }
+  try {
+    const res = await fetch(`${RUNNER_URL}/runs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const text = await res.text();
+    return new NextResponse(text, {
+      status: res.status,
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return NextResponse.json(
+      { error: `runner unreachable: ${msg}` },
+      { status: 502 },
+    );
+  }
+}

@@ -1,0 +1,86 @@
+export type AgentVisual = {
+  // Path relative to public/sprites/characters/
+  // Premade characters are full 4-direction animated sheets — simplest path
+  premade: string;
+  // Optional overlay layer for custom accessory (path relative to public/sprites/)
+  accessory?: string;
+};
+
+export type ThemeConfig = {
+  floor: string;
+  floorAlt: string;
+  wall: string;
+  deskTop: string;
+  deskSide: string;
+  accent: string;
+  highlight: string;
+  bg: string;
+  // PixiJS ColorMatrixFilter params applied to world container.
+  // Omit to leave untinted. Don't Call uses this for the 70s warm tone.
+  paletteFilter?: {
+    hue?: number;         // -180..180 degrees
+    saturation?: number;  // 0..2
+    brightness?: number;  // 0..2
+    contrast?: number;    // 0..2
+    tint?: string;        // hex color to blend toward
+    tintStrength?: number; // 0..1
+  };
+  // Interior tileset reference for floor/walls
+  interior?: {
+    tilesheet: string;              // path relative to public/sprites/interiors/
+    tileSize: 16 | 32 | 48;
+    floorTileIndex: [number, number]; // [col, row] on tilesheet
+    wallTileIndex?: [number, number];
+  };
+  // Premade room: render pre-composed layer PNGs instead of per-tile floor.
+  // Takes precedence over `interior` when both are set.
+  premadeRoom?: {
+    /** Paths relative to public/sprites/interiors/premade_rooms/, in z-order (layer1 = floor, layer2 = furniture, etc.) */
+    layers: string[];
+    /** Source PNG width in pixels (e.g. 304 for Japanese lounge) */
+    pixelWidth: number;
+    /** Source PNG height in pixels (e.g. 214 for Japanese lounge) */
+    pixelHeight: number;
+    /** Tile size the room was authored at (always 16 for LimeZu Modern Interiors) */
+    sourceTileSize: number;
+    /**
+     * Layer split index: layers BEFORE this index render below characters;
+     * layers AT or AFTER render above characters (use for hanging lights, front rails, etc.).
+     * If omitted, all layers render below characters.
+     */
+    characterDepthIndex?: number;
+  };
+};
+
+export type RoomConfig = { id: string; name: string; gridX: number; gridY: number; w: number; h: number };
+export type DeskConfig = { id: string; roomId: string; gridX: number; gridY: number; facing: "N" | "E" | "S" | "W" };
+export type AgentConfig = {
+  id: string;
+  deskId: string;
+  name: string;
+  role: string;
+  spritePack: string;   // kept for back-compat
+  visual: AgentVisual;  // NEW — LimeZu premade character visual identity
+  isReal: boolean;
+  cwd?: string;
+  allowedTools?: string[];
+  model?: string;        // Claude model id, e.g. "claude-opus-4-6"; omit for SDK default (Sonnet)
+};
+
+/**
+ * Visual indicator shown above an agent's sprite.
+ * - awaiting_input: agent called request_input and is blocked on a human reply
+ * - done_unacked:   latest run finished and the user hasn't opened the inspector yet
+ */
+export type IndicatorKind = "awaiting_input" | "done_unacked";
+
+export type OfficeConfig = {
+  slug: string;
+  name: string;
+  theme: ThemeConfig;
+  tile: { w: number; h: number };
+  grid: { cols: number; rows: number };
+  rooms: RoomConfig[];
+  desks: DeskConfig[];
+  agents: AgentConfig[];
+};
