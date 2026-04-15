@@ -502,8 +502,7 @@ function HomeInner() {
           </div>
         </div>
       </header>
-      <div className="flex flex-1 overflow-hidden">
-        <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="flex flex-1 flex-col overflow-hidden">
           <main
             className="relative flex-1 overflow-hidden"
             ref={officeContainerRef}
@@ -613,44 +612,9 @@ function HomeInner() {
             onSent={({ deskId, isReal }) => {
               if (isReal) selectDesk(deskId);
               void refetchRoster();
-              if (selectedDeskId === deskId)
-                setInspectorBump((n) => n + 1);
             }}
           />
-        </div>
-        {selectedDeskId ? (
-          <AgentInspector
-            key={`${sidebarSlug}:${selectedDeskId}:${inspectorBump}`}
-            officeSlug={sidebarSlug}
-            deskId={selectedDeskId}
-            onClose={() => selectDesk(null)}
-          />
-        ) : (
-          <RosterTray
-            officeSlug={sidebarSlug}
-            entries={rosterEntries}
-            onSelect={(deskId) => selectDesk(deskId)}
-            onConveneWarRoom={() => setMeetingOpen({ officeSlug: sidebarSlug })}
-            warRoomAccent={offices[sidebarSlug].theme.accent}
-          />
-        )}
       </div>
-      {meetingOpen && (
-        <MeetingModal
-          office={offices[meetingOpen.officeSlug]}
-          roster={meetingOpen.officeSlug === sidebarSlug ? rosterEntries : null}
-          onClose={() => setMeetingOpen(null)}
-          onConvened={() => {
-            void refetchRoster();
-          }}
-          onOpenInspector={(deskId) => {
-            const slug = meetingOpen.officeSlug;
-            setMeetingOpen(null);
-            focusModule(slug);
-            selectDesk(deskId, slug);
-          }}
-        />
-      )}
       <CommandPalette
         slug={sidebarSlug}
         otherSlug={sidebarSlug === "paradise" ? "dontcall" : "paradise"}
