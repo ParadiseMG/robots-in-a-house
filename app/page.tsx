@@ -21,6 +21,7 @@ import SpriteBubble from "@/components/sprite-bubble/SpriteBubble";
 import MeetingModal from "@/components/war-room/MeetingModal";
 import ChatDock, { DockTabsProvider } from "@/components/dock/ChatDock";
 import { useDockTabs } from "@/hooks/useDockTabs";
+import AgentHoverCard from "@/components/canvas/AgentHoverCard";
 
 const offices: Record<string, OfficeConfig> = {
   paradise: paradiseRaw as OfficeConfig,
@@ -66,6 +67,12 @@ function HomeInner() {
     runId?: string | null;
   } | null>(null);
   const [meetingOpen, setMeetingOpen] = useState<{ officeSlug: OfficeSlug } | null>(null);
+  const [hoverCard, setHoverCard] = useState<{
+    deskId: string;
+    officeSlug: OfficeSlug;
+    x: number;
+    y: number;
+  } | null>(null);
 
   // Restore sidebar slug + desk selection from localStorage on mount
   useEffect(() => {
@@ -453,6 +460,10 @@ function HomeInner() {
                   openWarRoom(slug, office ? `${office.name} War Room` : "War Room");
                 }
               }}
+              onAgentHover={(officeSlug, deskId, clientX, clientY) => {
+                setHoverCard({ deskId, officeSlug: officeSlug as OfficeSlug, x: clientX, y: clientY });
+              }}
+              onAgentHoverOut={() => setHoverCard(null)}
               showGrid={showGrid}
             />
             <StationMinimap
@@ -473,6 +484,37 @@ function HomeInner() {
               />
             )}
           </main>
+          {hoverCard && (() => {
+            const agent = agentByDesk.get(hoverCard.deskId);
+            if (!agent) return null;
+            const agentConfig = offices[hoverCard.officeSlug]?.agents.find(
+              (a) => a.deskId === hoverCard.deskId,
+            );
+            const rosterEntry = rosterEntries?.find(
+              (e) => e.agent.deskId === hoverCard.deskId,
+            );
+            if (!agentConfig) return null;
+            return (
+              <AgentHoverCard
+                agent={{
+                  deskId: hoverCard.deskId,
+                  officeSlug: hoverCard.officeSlug,
+                  name: agentConfig.name,
+                  role: agentConfig.role,
+                  isReal: agentConfig.isReal,
+                  model: agentConfig.model ?? null,
+                }}
+                run={rosterEntry ? {
+                  runStatus: rosterEntry.current?.runStatus ?? null,
+                  task: rosterEntry.current?.task ? { title: rosterEntry.current.task.title } : null,
+                  tokens: null,
+                } : null}
+                anchorX={hoverCard.x}
+                anchorY={hoverCard.y}
+                onDismiss={() => setHoverCard(null)}
+              />
+            );
+          })()}
           <UsageTracker />
           <ChatDock
             agents={allAgentsForDock}
