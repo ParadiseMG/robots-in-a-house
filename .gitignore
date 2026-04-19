@@ -39,7 +39,10 @@ yarn-error.log*
 
 # runtime data
 /data/
-/agent-workspaces/
+/agent-workspaces/**
+!/agent-workspaces/**/
+!/agent-workspaces/**/CLAUDE.md
+!/agent-workspaces/**/MEMORY.md
 
 # local agent + skill state
 /.claude/
