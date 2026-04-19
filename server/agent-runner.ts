@@ -24,6 +24,8 @@ import {
   getDelegationStatus,
   listDelegationsBy,
   upsertRateLimit,
+  requestToolApproval,
+  getToolApprovalByCallId,
   type AgentRunRow,
 } from "./db.js";
 import { reportError } from "./error-reporter.js";
@@ -112,6 +114,9 @@ function addRunTokens(
 // Single-process runner, so in-memory is fine.
 const waiters = new Map<string, (reply: string) => void>();
 
+// Registry of pending tool approval waiters, keyed by approvalId.
+export const toolApprovalWaiters = new Map<string, (result: { approved: boolean; reason?: string }) => void>();
+
 function makeInputServer(runId: string) {
   return createSdkMcpServer({
     name: "robots-input",
@@ -131,6 +136,71 @@ function makeInputServer(runId: string) {
           return {
             content: [{ type: "text", text: reply }],
           };
+        },
+      ),
+    ],
+  });
+}
+
+function makeToolApprovalServer(runId: string, agentId: string, officeSlug: string) {
+  return createSdkMcpServer({
+    name: "robots-tool-approval",
+    tools: [
+      tool(
+        "request_tool_approval",
+        "Request approval to use a tool that requires explicit permission. Use this before calling any tool that might be sensitive or destructive. Returns approved/denied status.",
+        {
+          tool_name: z.string().describe("Name of the tool you want to use"),
+          tool_input: z.record(z.unknown()).describe("Input parameters you want to pass to the tool"),
+          justification: z.string().describe("Brief explanation of why you need to use this tool")
+        },
+        async (args) => {
+          const toolCallId = crypto.randomUUID();
+          const approvalId = requestToolApproval({
+            runId,
+            agentId,
+            officeSlug,
+            toolName: args.tool_name,
+            toolInput: JSON.stringify(args.tool_input),
+            toolCallId,
+          });
+
+          insertEvent(runId, "tool_approval_request", {
+            approvalId,
+            toolName: args.tool_name,
+            toolInput: args.tool_input,
+            justification: args.justification,
+          });
+
+          updateRun(runId, { status: "awaiting_input" });
+
+          const result = await new Promise<{ approved: boolean; reason?: string }>((resolve) => {
+            toolApprovalWaiters.set(approvalId, resolve);
+          });
+
+          updateRun(runId, { status: "running" });
+
+          insertEvent(runId, "tool_approval_response", {
+            approvalId,
+            approved: result.approved,
+            reason: result.reason,
+          });
+
+          if (result.approved) {
+            return {
+              content: [{
+                type: "text",
+                text: `Tool approval granted for ${args.tool_name}. You may now proceed to use this tool with the specified parameters.`
+              }],
+            };
+          } else {
+            return {
+              content: [{
+                type: "text",
+                text: `Tool approval denied for ${args.tool_name}. Reason: ${result.reason || "No reason provided"}. Please find an alternative approach.`
+              }],
+            };
+          }
         },
       ),
     ],
@@ -674,9 +744,11 @@ async function runAgent(params: {
   insertEvent(runId, "status", { status: "running", cwd, resume });
 
   const inputServer = makeInputServer(runId);
-  const extraAllowed: string[] = ["mcp__robots-input__request_input"];
+  const toolApprovalServer = makeToolApprovalServer(runId, agentId, officeSlug);
+  const extraAllowed: string[] = ["mcp__robots-input__request_input", "mcp__robots-tool-approval__request_tool_approval"];
   const mcpServers: Record<string, ReturnType<typeof makeInputServer>> = {
     "robots-input": inputServer,
+    "robots-tool-approval": toolApprovalServer,
   };
   mcpServers["robots-changelog"] = makeChangelogServer(agentId, officeSlug);
   extraAllowed.push(
@@ -924,8 +996,25 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.method === "GET" && req.url === "/health") {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true }));
+      try {
+        const row = db().prepare("SELECT 1 as ok").get() as { ok: number } | undefined;
+        const activeRuns = db()
+          .prepare("SELECT COUNT(*) as n FROM agent_runs WHERE status IN ('starting', 'running')")
+          .get() as { n: number };
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: row?.ok === 1,
+            db: true,
+            activeRuns: activeRuns.n,
+            uptime: Math.floor(process.uptime()),
+            pid: process.pid,
+          }),
+        );
+      } catch (err) {
+        res.writeHead(503, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, db: false, error: String(err) }));
+      }
       return;
     }
 

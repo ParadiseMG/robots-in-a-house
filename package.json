@@ -3,11 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "concurrently -n next,runner -c cyan,magenta \"next dev\" \"tsx watch --ignore 'config/**/*.json' --ignore 'data/**/*' --ignore 'agent-workspaces/**/*' server/agent-runner.ts\"",
+    "predev": "lsof -ti :3000 | xargs -r kill -9 2>/dev/null; pgrep -f 'next dev|agent-runner' | xargs -r kill -9 2>/dev/null; exit 0",
+    "dev": "concurrently -n next,runner -c cyan,magenta \"next dev\" \"tsx server/agent-runner.ts\"",
     "dev:next": "next dev",
-    "dev:runner": "tsx watch --ignore 'config/**/*.json' --ignore 'data/**/*' --ignore 'agent-workspaces/**/*' server/agent-runner.ts",
+    "dev:runner": "tsx server/agent-runner.ts",
     "build": "next build",
     "start": "next start",
+    "start:prod": "NODE_ENV=production tsx server/start.ts",
+    "start:dev": "tsx server/start.ts",
+    "check": "tsx server/boot-check.ts",
     "lint": "eslint"
   },
   "dependencies": {
