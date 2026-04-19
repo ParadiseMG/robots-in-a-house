@@ -2,7 +2,23 @@
 
 Top-down pixel-art office where Connor works alongside AI agents (real Claude Agent SDK sessions) rendered as sprites. Two offices: **Paradise** (music events) and **Don't Call** (SMS service for tradespeople).
 
-## Run it
+## Install with Claude Code
+
+```bash
+claude -p "clone ParadiseMG/robots-in-a-house, install deps, and run the dev server"
+```
+
+Or step by step:
+
+```bash
+git clone https://github.com/ParadiseMG/robots-in-a-house.git
+cd robots-in-a-house
+claude
+```
+
+Then tell Claude: `install and run it`. It'll handle `npm install`, start the dev server, and walk you through auth setup.
+
+## Run it manually
 
 ```bash
 npm install
