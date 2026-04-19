@@ -354,6 +354,21 @@ function HomeInner() {
     return links;
   }, [rosterEntries]);
 
+  // Map delegator agentId → names of agents they're currently delegating to.
+  const delegateeNamesByAgent = useMemo(() => {
+    const nameMap = new Map<string, string>();
+    for (const e of rosterEntries ?? []) nameMap.set(e.agent.id, e.agent.name);
+    const m = new Map<string, string[]>();
+    for (const e of rosterEntries ?? []) {
+      const delegatorId = (e as { delegatedByAgentId?: string | null }).delegatedByAgentId;
+      if (!delegatorId) continue;
+      const names = m.get(delegatorId) ?? [];
+      names.push(e.agent.name);
+      m.set(delegatorId, names);
+    }
+    return m;
+  }, [rosterEntries]);
+
   const deskRunStatus = useMemo(() => {
     const m = new Map<string, string>();
     for (const e of rosterEntries ?? []) {
@@ -362,6 +377,8 @@ function HomeInner() {
       if (status === "done") {
         // Only colour the tab while unacknowledged
         if (!e.current?.acknowledgedAt) m.set(e.agent.deskId, "done_unacked");
+      } else if ((status === "running" || status === "starting") && (e.activeDelegations ?? 0) > 0) {
+        m.set(e.agent.deskId, "delegating");
       } else {
         m.set(e.agent.deskId, status);
       }
@@ -678,8 +695,63 @@ function HomeInner() {
               contextUsage={contextUsage}
               showGrid={showGrid}
             />
-            {/* Active war rooms — top-right overlay */}
-            <div className="pointer-events-auto absolute right-3 top-3 z-20 w-64">
+            {/* Tool buttons — top-right */}
+            <div className="pointer-events-auto absolute right-3 top-3 z-30 flex gap-2">
+            <a
+              href="/workspace-builder"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex h-9 w-9 items-center justify-center rounded-lg bg-gray-900/80 text-gray-300 shadow-lg backdrop-blur-sm transition-colors hover:bg-gray-800 hover:text-white"
+              title="Workspace Builder"
+            >
+              {/* Pixel-art little house/building */}
+              <svg width="20" height="20" viewBox="0 0 16 16" shapeRendering="crispEdges">
+                {/* Roof */}
+                <rect x="7" y="1" width="2" height="1" fill="currentColor" />
+                <rect x="5" y="2" width="6" height="1" fill="currentColor" />
+                <rect x="3" y="3" width="10" height="1" fill="currentColor" />
+                {/* Walls */}
+                <rect x="3" y="4" width="10" height="7" fill="currentColor" />
+                {/* Door */}
+                <rect x="7" y="8" width="2" height="3" fill="#1a1a2e" />
+                {/* Windows */}
+                <rect x="4" y="5" width="2" height="2" fill="#facc15" />
+                <rect x="10" y="5" width="2" height="2" fill="#facc15" />
+                {/* Chimney */}
+                <rect x="10" y="0" width="2" height="3" fill="currentColor" />
+              </svg>
+            </a>
+            <a
+              href="/sprite-maker"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex h-9 w-9 items-center justify-center rounded-lg bg-gray-900/80 text-gray-300 shadow-lg backdrop-blur-sm transition-colors hover:bg-gray-800 hover:text-white"
+              title="Sprite Maker"
+            >
+              {/* Pixel-art little person + sparkle */}
+              <svg width="20" height="20" viewBox="0 0 16 16" shapeRendering="crispEdges">
+                {/* Head */}
+                <rect x="5" y="1" width="4" height="4" fill="currentColor" rx="0" />
+                {/* Body */}
+                <rect x="6" y="5" width="2" height="3" fill="currentColor" />
+                {/* Arms */}
+                <rect x="4" y="6" width="2" height="1" fill="currentColor" />
+                <rect x="8" y="6" width="2" height="1" fill="currentColor" />
+                {/* Legs */}
+                <rect x="5" y="8" width="2" height="3" fill="currentColor" />
+                <rect x="7" y="8" width="2" height="3" fill="currentColor" />
+                {/* Sparkle */}
+                <rect x="12" y="1" width="1" height="3" fill="#facc15" />
+                <rect x="11" y="2" width="3" height="1" fill="#facc15" />
+                <rect x="10" y="0" width="1" height="1" fill="#facc15" opacity="0.5" />
+                <rect x="14" y="0" width="1" height="1" fill="#facc15" opacity="0.5" />
+                <rect x="10" y="4" width="1" height="1" fill="#facc15" opacity="0.5" />
+                <rect x="14" y="4" width="1" height="1" fill="#facc15" opacity="0.5" />
+              </svg>
+            </a>
+            </div>
+            {/* Active war rooms — top-right overlay, below tool buttons */}
+            <div className="pointer-events-auto absolute right-3 top-14 z-20 w-64">
               <ActiveWarRooms
                 agentNames={agentNameMap}
                 officeNames={officeNameMap}
@@ -820,6 +892,8 @@ function HomeInner() {
                   tokens: null,
                 } : null}
                 queueDepth={rosterEntry?.queueDepth ?? 0}
+                activeDelegations={rosterEntry?.activeDelegations ?? 0}
+                delegateeNames={rosterEntry ? (delegateeNamesByAgent.get(rosterEntry.agent.id) ?? []) : []}
                 anchorX={hoverCard.x}
                 anchorY={hoverCard.y}
                 onDismiss={() => setHoverCard(null)}

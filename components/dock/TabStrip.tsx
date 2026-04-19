@@ -62,6 +62,8 @@ function tabStateColor(status: string | undefined): {
       return { border: "border-l-emerald-500", text: "text-emerald-300", dot: "bg-emerald-500" };
     case "error":
       return { border: "border-l-red-500", text: "text-red-400", dot: "bg-red-500" };
+    case "delegating":
+      return { border: "border-l-purple-500", text: "text-purple-300", dot: "bg-purple-400 animate-pulse" };
     case "running":
     case "starting":
       return { border: "border-l-sky-500", text: "text-sky-300", dot: "bg-sky-400 animate-pulse" };

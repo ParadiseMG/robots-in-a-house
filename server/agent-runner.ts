@@ -760,10 +760,17 @@ async function runAgent(params: {
         // each assistant message. Only update terminal fields here to avoid
         // overwriting the accumulated totals with the last-step-only values
         // from the result event.
+        // Auto-acknowledge delegated runs — the delegator already gets the
+        // result via check_delegation, so there's no need for a lingering
+        // "done" indicator on the builder's sprite/tab.
+        const isDelegatedRun = db()
+          .prepare("SELECT delegated_by_agent_id FROM agent_runs WHERE id = ?")
+          .get(runId) as { delegated_by_agent_id: string | null } | undefined;
         updateRun(runId, {
           status: "done",
           ended_at: now,
           session_id: msg.session_id,
+          ...(isDelegatedRun?.delegated_by_agent_id ? { acknowledged_at: now } : {}),
         });
       } else if (msg.type === "rate_limit_event") {
         const info = msg.rate_limit_info;
