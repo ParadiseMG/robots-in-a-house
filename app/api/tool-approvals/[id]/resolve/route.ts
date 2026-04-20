@@ -11,10 +11,10 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const approvalId = params.id;
+    const { id: approvalId } = await params;
     const body = await request.json();
     const { action, reason } = body;
 
@@ -44,10 +44,8 @@ export async function POST(
       return NextResponse.json({ error: "Failed to update approval" }, { status: 500 });
     }
 
-    // Notify the waiting agent runner (import the waiters map)
-    // Note: This requires accessing the agent runner's in-memory state
-    // We'll need to import this or create a notification mechanism
-    const { toolApprovalWaiters } = await import("@/server/agent-runner");
+    // Notify the waiting agent runner via the shared waiters map
+    const { toolApprovalWaiters } = await import("@/server/tool-approval-waiters");
     const waiter = toolApprovalWaiters.get(approvalId);
     if (waiter) {
       waiter({
