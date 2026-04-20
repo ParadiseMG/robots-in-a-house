@@ -72,7 +72,7 @@ export type RoomConfig = {
   gridY: number;
   w: number;
   h: number;
-  warRoom?: { gridX: number; gridY: number };  // cell to render the meeting-table click target
+  groupchat?: { gridX: number; gridY: number };  // cell to render a groupchat click target
 };
 export type DeskConfig = { id: string; roomId: string; gridX: number; gridY: number; facing: "N" | "E" | "S" | "W" };
 export type AgentConfig = {

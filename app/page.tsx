@@ -17,9 +17,8 @@ import ChatDock, { DockTabsProvider } from "@/components/dock/ChatDock";
 import HeadsView from "@/components/views/HeadsView";
 import { useDockTabs } from "@/hooks/useDockTabs";
 import AgentHoverCard from "@/components/canvas/AgentHoverCard";
-import ActiveWarRooms from "@/components/events/ActiveWarRooms";
-import NotificationCenter from "@/components/notifications/NotificationCenter";
-import ErrorLog from "@/components/errors/ErrorLog";
+import ActiveGroupchats from "@/components/events/ActiveGroupchats";
+import OfficeTodos from "@/components/todos/OfficeTodos";
 import Tooltip from "@/components/ui/Tooltip";
 import HealthBanner from "@/components/health/HealthBanner";
 import WelcomePrompt from "@/components/health/WelcomePrompt";
@@ -109,7 +108,7 @@ export default function Home() {
 }
 
 function HomeInner() {
-  const { openOrFocus, openWarRoom, focusedTab, tabs, reorder } = useDockTabs();
+  const { openOrFocus, openGroupchat, focusedTab, tabs, reorder } = useDockTabs();
 
   // Dynamic office loading
   const [offices, setOffices] = useState<Record<string, OfficeConfig>>({});
@@ -731,21 +730,6 @@ function HomeInner() {
     [bubble, agentByDesk, selectDesk, refetchRoster],
   );
 
-  const handleToolApproval = useCallback(
-    async (approvalId: string, action: "approve" | "deny", reason?: string) => {
-      try {
-        await fetch(`/api/tool-approvals/${encodeURIComponent(approvalId)}/resolve`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action, reason }),
-        });
-      } catch (error) {
-        console.error("Failed to resolve tool approval:", error);
-      }
-    },
-    [],
-  );
-
   const handleAgentMove = useCallback(
     async (
       officeSlug: string,
@@ -813,7 +797,7 @@ function HomeInner() {
     }));
   }, [allAgentsWithSlug]);
 
-  // Lookup maps for ActiveWarRooms
+  // Lookup maps for ActiveGroupchats + NotificationCenter
   const agentNameMap = useMemo(() => {
     const m = new Map<string, string>();
     for (const slug of order) {
@@ -975,51 +959,15 @@ function HomeInner() {
               </a>
               </Tooltip>
             </div>
-            {/* Notifications — top-left, below toolbar (canvas view only) */}
-            {viewMode === "canvas" && <div className="pointer-events-auto absolute left-3 top-14 z-20 w-64 flex flex-col gap-2">
-              <NotificationCenter
-                officeNames={officeNameMap}
-                officeAccents={officeAccentMap}
-                onOpenWarRoom={(slug, meetingId) => {
-                  const office = offices[slug];
-                  openWarRoom(
-                    slug,
-                    office ? `${office.name} War Room` : "War Room",
-                    meetingId,
-                  );
-                }}
-                onOpenAgent={(slug, agentId) => {
-                  const agentConfig = offices[slug]?.agents.find((a) => a.id === agentId);
-                  if (!agentConfig) return;
-                  openOrFocus({
-                    id: agentId,
-                    agentId,
-                    deskId: agentConfig.deskId,
-                    officeSlug: slug,
-                    kind: "1:1",
-                    label: agentConfig.name,
-                  });
-                }}
-                onToolApproval={handleToolApproval}
-              />
-              <ErrorLog
-                officeNames={officeNameMap}
-                activeOfficeSlug={sidebarSlug}
-                activeAgentId={focusedTab?.agentId ?? null}
-                onOpenAgent={(slug, agentId) => {
-                  const agentConfig = offices[slug]?.agents.find((a) => a.id === agentId);
-                  if (!agentConfig) return;
-                  openOrFocus({
-                    id: agentId,
-                    agentId,
-                    deskId: agentConfig.deskId,
-                    officeSlug: slug,
-                    kind: "1:1",
-                    label: agentConfig.name,
-                  });
-                }}
-              />
-            </div>}
+            {/* To-do list — top-left, below toolbar (canvas view only) */}
+            {viewMode === "canvas" && focusedModule && (
+              <div className="pointer-events-auto absolute left-3 top-14 z-20 w-64">
+                <OfficeTodos
+                  officeSlug={focusedModule}
+                  accent={offices[focusedModule]?.theme?.accent}
+                />
+              </div>
+            )}
             {viewMode === "grid" ? (
               <HeadsView
                 heads={headAgents}
@@ -1059,12 +1007,6 @@ function HomeInner() {
               onAgentMove={handleAgentMove}
               onModuleMove={handleModuleMove}
               onModuleFocus={(slug) => focusModule(slug as string)}
-              onWarRoomClick={(slug) => {
-                if (offices[slug]) {
-                  const office = offices[slug];
-                  openWarRoom(slug, `${office.name} War Room`);
-                }
-              }}
               onAgentHover={(officeSlug, deskId, clientX, clientY) => {
                 setHoverCard({ deskId, officeSlug: officeSlug as string, x: clientX, y: clientY });
               }}
@@ -1075,15 +1017,14 @@ function HomeInner() {
               contextUsage={contextUsage}
               showGrid={showGrid}
             />
-            {/* Active war rooms — top-right overlay, below tool buttons */}
+            {/* Active groupchats — top-right overlay, below tool buttons */}
             <div className="pointer-events-auto absolute right-3 top-14 z-20 w-64">
-              <ActiveWarRooms
+              <ActiveGroupchats
                 agentNames={agentNameMap}
                 officeNames={officeNameMap}
                 officeAccents={officeAccentMap}
-                onOpen={(slug, meetingId) => {
-                  const office = offices[slug];
-                  openWarRoom(slug, office ? `${office.name} War Room` : "War Room", meetingId);
+                onOpen={(groupchatId) => {
+                  openGroupchat("Groupchat", groupchatId);
                 }}
               />
             </div>

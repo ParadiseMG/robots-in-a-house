@@ -3,16 +3,18 @@ import { db } from "@/server/db";
 
 export const dynamic = "force-dynamic";
 
-type AttendeeRow = { agent_id: string; assignment_id: string };
-type MeetingRow = {
+type MemberRow = { agent_id: string; office_slug: string; assignment_id: string };
+type GroupchatRow = {
   id: string;
-  office_slug: string;
   task_id: string;
   convened_by: string;
   prompt: string;
   convened_at: number;
   target_rounds: number;
   synthesis_run_id: string | null;
+  persistent: number;
+  pinned_name: string | null;
+  status: string;
 };
 type RunRow = { id: string; status: string; session_id: string | null };
 type EventRow = { payload: string };
@@ -28,35 +30,31 @@ function extractTailSnippet(runId: string, d: ReturnType<typeof db>): string | n
   if (!ev) return null;
   try {
     const parsed = JSON.parse(ev.payload) as { text?: string };
-    if (parsed.text) {
-      return parsed.text;
-    }
-  } catch {
-    // ignore
-  }
+    if (parsed.text) return parsed.text;
+  } catch {}
   return null;
 }
 
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const { id: meetingId } = await ctx.params;
-  if (!meetingId) {
-    return NextResponse.json({ error: "missing meeting id" }, { status: 400 });
+  const { id: groupchatId } = await ctx.params;
+  if (!groupchatId) {
+    return NextResponse.json({ error: "missing groupchat id" }, { status: 400 });
   }
   const d = db();
-  const meeting = d
-    .prepare("SELECT * FROM meetings WHERE id = ?")
-    .get(meetingId) as MeetingRow | undefined;
-  if (!meeting) {
-    return NextResponse.json({ error: "meeting not found" }, { status: 404 });
+  const gc = d
+    .prepare("SELECT * FROM groupchats WHERE id = ?")
+    .get(groupchatId) as GroupchatRow | undefined;
+  if (!gc) {
+    return NextResponse.json({ error: "groupchat not found" }, { status: 404 });
   }
 
-  const attendeeRows = d
-    .prepare("SELECT agent_id, assignment_id FROM meeting_attendees WHERE meeting_id = ?")
-    .all(meetingId) as AttendeeRow[];
+  const memberRows = d
+    .prepare("SELECT agent_id, office_slug, assignment_id FROM groupchat_members WHERE groupchat_id = ?")
+    .all(groupchatId) as MemberRow[];
 
   const SETTLED = new Set(["done", "error"]);
 
-  const attendees = attendeeRows.map((row) => {
+  const members = memberRows.map((row) => {
     const allRuns = d
       .prepare(
         `SELECT id, status, session_id FROM agent_runs
@@ -76,26 +74,24 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
 
     return {
       agentId: row.agent_id,
+      officeSlug: row.office_slug,
       assignmentId: row.assignment_id,
-      // Legacy fields for backwards compat with polling loop
       runId: latestRun?.id ?? null,
-      runStatus: latestRun?.status ?? "queued",
+      runStatus: latestRun?.status ?? "idle",
       tailSnippet: runs.at(-1)?.tailSnippet ?? null,
       runs,
     };
   });
 
-  // roundsCompleted: highest round number where every attendee has a settled run
-  // currentRound: highest round number seen across any attendee
   let roundsCompleted = 0;
   let currentRound = 0;
 
-  if (attendees.length > 0) {
-    const maxRounds = Math.max(...attendees.map((a) => a.runs.length));
+  if (members.length > 0) {
+    const maxRounds = Math.max(...members.map((a) => a.runs.length));
     currentRound = maxRounds;
 
     for (let r = maxRounds; r >= 1; r--) {
-      const allSettled = attendees.every((a) => {
+      const allSettled = members.every((a) => {
         const run = a.runs.find((run) => run.round === r);
         return run !== undefined && SETTLED.has(run.status);
       });
@@ -106,20 +102,13 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     }
   }
 
-  const allDone = attendees.every((a) => SETTLED.has(a.runStatus));
+  const allDone = members.every((a) => SETTLED.has(a.runStatus) || a.runStatus === "idle");
 
-  // Load synthesis run, if any
-  let synthesis: {
-    runId: string;
-    status: string;
-    text: string | null;
-  } | null = null;
-  if (meeting.synthesis_run_id) {
+  let synthesis: { runId: string; status: string; text: string | null } | null = null;
+  if (gc.synthesis_run_id) {
     const synRow = d
       .prepare("SELECT id, status FROM agent_runs WHERE id = ?")
-      .get(meeting.synthesis_run_id) as
-      | { id: string; status: string }
-      | undefined;
+      .get(gc.synthesis_run_id) as { id: string; status: string } | undefined;
     if (synRow) {
       synthesis = {
         runId: synRow.id,
@@ -130,16 +119,17 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
   }
 
   return NextResponse.json({
-    meetingId,
-    officeSlug: meeting.office_slug,
-    convenedBy: meeting.convened_by,
-    prompt: meeting.prompt,
-    convenedAt: meeting.convened_at,
-    status: allDone ? "done" : "running",
+    groupchatId,
+    convenedBy: gc.convened_by,
+    prompt: gc.prompt,
+    convenedAt: gc.convened_at,
+    persistent: !!gc.persistent,
+    pinnedName: gc.pinned_name,
+    status: gc.status === "idle" ? "idle" : allDone ? "done" : "running",
     roundsCompleted,
     currentRound,
-    targetRounds: meeting.target_rounds ?? 1,
-    attendees,
+    targetRounds: gc.target_rounds ?? 1,
+    members,
     synthesis,
   });
 }

@@ -27,6 +27,9 @@ import {
   upsertRateLimit,
   requestToolApproval,
   getToolApprovalByCallId,
+  listTodos,
+  createTodo,
+  updateTodo,
   type AgentRunRow,
 } from "./db.js";
 import { reportError } from "./error-reporter.js";
@@ -1161,6 +1164,58 @@ function makeChangelogServer(agentId: string, officeSlug: string) {
   });
 }
 
+function makeTodosServer(officeSlug: string) {
+  return createSdkMcpServer({
+    name: "robots-todos",
+    tools: [
+      tool(
+        "manage_todos",
+        "Manage your office's to-do list. Connor sees this list in the UI when viewing your office. Use it to track work items, blockers, or things Connor should know about.",
+        {
+          action: z.enum(["list", "add", "done", "undone"]).describe(
+            "list = view all todos, add = create a new item, done = mark complete, undone = reopen",
+          ),
+          text: z.string().optional().describe("Text for a new todo (required for 'add')"),
+          todoId: z.string().optional().describe("Todo ID (required for 'done'/'undone')"),
+        },
+        async (args) => {
+          if (args.action === "list") {
+            const todos = listTodos(officeSlug);
+            if (todos.length === 0) {
+              return { content: [{ type: "text" as const, text: "No todos for this office." }] };
+            }
+            const lines = todos.map((t) =>
+              `${t.done ? "[x]" : "[ ]"} ${t.text}  (id: ${t.id})`,
+            );
+            return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+          }
+
+          if (args.action === "add") {
+            if (!args.text?.trim()) {
+              return { content: [{ type: "text" as const, text: "text is required for add." }], isError: true };
+            }
+            const todo = createTodo(officeSlug, args.text.trim());
+            return { content: [{ type: "text" as const, text: `Added: "${todo.text}" (id: ${todo.id})` }] };
+          }
+
+          if (args.action === "done" || args.action === "undone") {
+            if (!args.todoId) {
+              return { content: [{ type: "text" as const, text: "todoId is required." }], isError: true };
+            }
+            const ok = updateTodo(args.todoId, { done: args.action === "done" });
+            if (!ok) {
+              return { content: [{ type: "text" as const, text: `Todo ${args.todoId} not found.` }], isError: true };
+            }
+            return { content: [{ type: "text" as const, text: `Marked ${args.action}.` }] };
+          }
+
+          return { content: [{ type: "text" as const, text: "Unknown action." }], isError: true };
+        },
+      ),
+    ],
+  });
+}
+
 async function runAgent(params: {
   runId: string;
   agentId: string;
@@ -1204,6 +1259,8 @@ async function runAgent(params: {
     "mcp__robots-changelog__log_change",
     "mcp__robots-changelog__query_changelog",
   );
+  mcpServers["robots-todos"] = makeTodosServer(officeSlug);
+  extraAllowed.push("mcp__robots-todos__manage_todos");
   if (agent.isHead) {
     mcpServers["robots-brand"] = makeBrandServer(runId, officeSlug);
     extraAllowed.push("mcp__robots-brand__create_agent");

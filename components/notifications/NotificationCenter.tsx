@@ -10,7 +10,8 @@ type SynthesisNotification = {
   status: "done" | "error";
   at: number;
   officeSlug: string;
-  meetingId: string;
+  meetingId: string; // legacy war-room meetings
+  groupchatId?: string; // new groupchats
   promptSnippet: string;
 };
 
@@ -59,8 +60,8 @@ const URGENT_COLOR = "#fde047"; // amber — matches the `!` desk indicator
 type Props = {
   officeNames: ReadonlyMap<string, string>;
   officeAccents: ReadonlyMap<string, string>;
-  /** Open a war room tab for the given meeting. */
-  onOpenWarRoom: (officeSlug: string, meetingId: string) => void;
+  /** Open a groupchat tab for the given groupchat. */
+  onOpenGroupchat: (groupchatId: string) => void;
   /** Focus the chat for this agent. */
   onOpenAgent: (officeSlug: string, agentId: string) => void;
   /** Handle tool approval request. */
@@ -125,7 +126,7 @@ function timeLabel(ts: number): string {
 export default function NotificationCenter({
   officeNames,
   officeAccents,
-  onOpenWarRoom,
+  onOpenGroupchat,
   onOpenAgent,
   onToolApproval,
 }: Props) {
@@ -197,7 +198,8 @@ export default function NotificationCenter({
 
   const handleOpen = (n: Notification) => {
     if (n.kind === "synthesis") {
-      onOpenWarRoom(n.officeSlug, n.meetingId);
+      const gcId = n.groupchatId ?? n.meetingId;
+      onOpenGroupchat(gcId);
       void dismiss(n.runId);
     } else if (n.kind === "agent_run") {
       onOpenAgent(n.officeSlug, n.agentId);

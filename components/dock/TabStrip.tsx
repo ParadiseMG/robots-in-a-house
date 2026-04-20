@@ -6,13 +6,13 @@ import Tooltip from "@/components/ui/Tooltip";
 import { useVisibleInterval } from "@/hooks/useVisibleInterval";
 
 type AgentStatus = { agentId: string; status: string };
-type WarRoomSummary = {
-  meetingId: string;
-  status: "running" | "done";
+type GroupchatSummary = {
+  groupchatId: string;
+  status: "running" | "done" | "idle";
   agentStatuses: AgentStatus[];
 };
 
-function aggregateWarRoomStatus(agentStatuses: AgentStatus[]): string {
+function aggregateStatus(agentStatuses: AgentStatus[]): string {
   if (agentStatuses.some((a) => a.status === "error")) return "error";
   if (agentStatuses.some((a) => a.status === "awaiting_input")) return "awaiting_input";
   if (agentStatuses.some((a) => a.status === "running" || a.status === "starting")) return "running";
@@ -20,16 +20,16 @@ function aggregateWarRoomStatus(agentStatuses: AgentStatus[]): string {
   return "idle";
 }
 
-function useWarRoomStatuses(): ReadonlyMap<string, string> {
+function useGroupchatStatuses(): ReadonlyMap<string, string> {
   const [statusMap, setStatusMap] = useState<ReadonlyMap<string, string>>(new Map());
   useVisibleInterval(() => {
-    fetch("/api/war-room?status=recent", { cache: "no-store" })
-      .then((r) => r.ok ? r.json() as Promise<{ meetings: WarRoomSummary[] }> : null)
+    fetch("/api/groupchats?status=recent", { cache: "no-store" })
+      .then((r) => r.ok ? r.json() as Promise<{ groupchats: GroupchatSummary[] }> : null)
       .then((j) => {
         if (!j) return;
         const m = new Map<string, string>();
-        for (const meeting of j.meetings) {
-          m.set(meeting.meetingId, aggregateWarRoomStatus(meeting.agentStatuses));
+        for (const gc of j.groupchats) {
+          m.set(gc.groupchatId, gc.status === "idle" ? "idle" : aggregateStatus(gc.agentStatuses));
         }
         setStatusMap(m);
       })
@@ -95,8 +95,8 @@ function TabButton({
       }`}
       title={tab.label}
     >
-      {tab.kind === "war-room" && (
-        <span className="shrink-0 text-[9px] opacity-60">⚔</span>
+      {tab.kind === "groupchat" && (
+        <span className="shrink-0 text-[9px] opacity-60">&#9993;</span>
       )}
       {state.dot && (
         <span className={`shrink-0 h-1.5 w-1.5 rounded-full ${state.dot}`} />
@@ -113,7 +113,7 @@ function TabButton({
           className="ml-auto shrink-0 rounded px-0.5 text-[10px] text-white/30 opacity-0 group-hover:opacity-100 hover:text-white"
           aria-label={`Close ${tab.label}`}
         >
-          ✕
+          &#10005;
         </span>
       )}
     </button>
@@ -129,7 +129,7 @@ export default function TabStrip({
   onReportBug,
 }: Props) {
   const { tabs, focusedId, focus, close, reorder, moveToEnd } = useDockTabs();
-  const warRoomStatuses = useWarRoomStatuses();
+  const groupchatStatuses = useGroupchatStatuses();
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const [dragOverEnd, setDragOverEnd] = useState<boolean>(false);
   const dragIdRef = useRef<string | null>(null);
@@ -160,7 +160,7 @@ export default function TabStrip({
           className="flex w-8 shrink-0 items-center justify-center border-r border-white/10 text-white/40 hover:bg-white/5 hover:text-white"
           aria-label={collapsed ? "Expand dock" : "Collapse dock"}
         >
-          <span className="text-[10px]">{collapsed ? "▲" : "▼"}</span>
+          <span className="text-[10px]">{collapsed ? "\u25B2" : "\u25BC"}</span>
         </button>
       </Tooltip>
 
@@ -170,7 +170,7 @@ export default function TabStrip({
           const runStatus =
             tab.kind === "1:1"
               ? (tab.deskId ? deskRunStatus?.get(tab.deskId) : undefined)
-              : (tab.meetingId ? warRoomStatuses.get(tab.meetingId) : undefined);
+              : (tab.groupchatId ? groupchatStatuses.get(tab.groupchatId) : undefined);
           return (
             <div
               key={tab.id}

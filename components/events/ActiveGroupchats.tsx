@@ -3,16 +3,17 @@
 import { useState } from "react";
 import { useVisibleInterval } from "@/hooks/useVisibleInterval";
 
-type AgentStatus = { agentId: string; status: string };
+type AgentStatus = { agentId: string; officeSlug: string; status: string };
 
-type WarRoomSummary = {
-  meetingId: string;
-  officeSlug: string;
+type GroupchatSummary = {
+  groupchatId: string;
   convenedBy: string;
   prompt: string;
   convenedAt: number;
-  status: "running" | "done";
-  attendeeCount: number;
+  persistent: boolean;
+  pinnedName: string | null;
+  status: "running" | "done" | "idle";
+  memberCount: number;
   agentStatuses: AgentStatus[];
 };
 
@@ -20,7 +21,7 @@ type Props = {
   agentNames: ReadonlyMap<string, string>;
   officeNames: ReadonlyMap<string, string>;
   officeAccents: ReadonlyMap<string, string>;
-  onOpen: (officeSlug: string, meetingId: string) => void;
+  onOpen: (groupchatId: string) => void;
 };
 
 const POLL_MS = 3000;
@@ -30,21 +31,24 @@ function statusDot(status: string): string {
   if (status === "awaiting_input") return "#fde047";
   if (status === "done") return "#34d399";
   if (status === "error") return "#f87171";
+  if (status === "idle") return "#71717a";
   return "#71717a";
 }
 
-export default function ActiveWarRooms({ agentNames, officeNames, officeAccents, onOpen }: Props) {
-  const [meetings, setMeetings] = useState<WarRoomSummary[]>([]);
+export default function ActiveGroupchats({ agentNames, officeNames, officeAccents, onOpen }: Props) {
+  const [groupchats, setGroupchats] = useState<GroupchatSummary[]>([]);
   const [collapsed, setCollapsed] = useState(false);
 
   useVisibleInterval(() => {
-    fetch("/api/war-room?status=recent")
-      .then((r) => r.ok ? r.json() as Promise<{ meetings: WarRoomSummary[] }> : null)
-      .then((j) => { if (j) setMeetings(j.meetings); })
+    fetch("/api/groupchats?status=recent")
+      .then((r) => r.ok ? r.json() as Promise<{ groupchats: GroupchatSummary[] }> : null)
+      .then((j) => { if (j) setGroupchats(j.groupchats); })
       .catch(() => {});
   }, POLL_MS);
 
-  if (meetings.length === 0) return null;
+  if (groupchats.length === 0) return null;
+
+  const accentColor = "#10b981";
 
   return (
     <div className="flex flex-col gap-1">
@@ -59,42 +63,50 @@ export default function ActiveWarRooms({ agentNames, officeNames, officeAccents,
         >
           &#9662;
         </span>
-        war rooms
+        groupchats
         {collapsed && (
-          <span className="ml-1 tabular-nums text-white/20">({meetings.length})</span>
+          <span className="ml-1 tabular-nums text-white/20">({groupchats.length})</span>
         )}
       </button>
-      {!collapsed && meetings.map((m) => {
-        const accent = officeAccents.get(m.officeSlug) ?? "#10b981";
-        const officeName = officeNames.get(m.officeSlug) ?? m.officeSlug;
-        const isActive = m.status === "running";
+      {!collapsed && groupchats.map((gc) => {
+        const isActive = gc.status === "running";
+        const isPinned = gc.persistent;
+
+        // Determine which offices are involved
+        const officesInvolved = new Set(gc.agentStatuses.map((a) => a.officeSlug));
+        const isCrossOffice = officesInvolved.size > 1;
 
         return (
           <button
-            key={m.meetingId}
+            key={gc.groupchatId}
             type="button"
-            onClick={() => onOpen(m.officeSlug, m.meetingId)}
+            onClick={() => onOpen(gc.groupchatId)}
             className="group flex flex-col gap-1 rounded border border-white/8 bg-white/[0.02] px-2.5 py-2 text-left transition hover:bg-white/[0.06]"
           >
             <div className="flex items-center gap-1.5">
               {isActive && (
                 <span
                   className="inline-block h-1.5 w-1.5 animate-pulse rounded-full"
-                  style={{ backgroundColor: accent }}
+                  style={{ backgroundColor: accentColor }}
                 />
               )}
-              <span className="font-mono text-[10px] uppercase tracking-wider" style={{ color: accent }}>
-                {officeName}
+              {isPinned && (
+                <span className="font-mono text-[9px]" style={{ color: accentColor }}>
+                  &#9733;
+                </span>
+              )}
+              <span className="font-mono text-[10px] uppercase tracking-wider" style={{ color: accentColor }}>
+                {gc.pinnedName ?? (isCrossOffice ? "cross-office" : Array.from(officesInvolved).map((s) => officeNames.get(s) ?? s).join(", "))}
               </span>
               <span className="ml-auto font-mono text-[9px] text-white/25">
-                {new Date(m.convenedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                {gc.status === "idle" ? "idle" : new Date(gc.convenedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
               </span>
             </div>
             <div className="text-[11px] leading-tight text-white/60 group-hover:text-white/80">
-              {m.prompt}
+              {gc.prompt}
             </div>
             <div className="flex items-center gap-1.5">
-              {m.agentStatuses.map((a) => (
+              {gc.agentStatuses.map((a) => (
                 <span key={a.agentId} className="flex items-center gap-0.5">
                   <span
                     className="inline-block h-1 w-1 rounded-full"

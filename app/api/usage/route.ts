@@ -32,11 +32,15 @@ export async function GET() {
   const tokens = row.input_tokens + row.output_tokens;
 
   // Pull real rate limit data from Anthropic (captured from SDK events).
-  // Only surface entries updated within the current window — stale rows
-  // from previous sessions would keep the bar visible at 0%.
+  // A row is stale if (a) it was last updated before the current window, or
+  // (b) its resetsAt timestamp has passed — the window rolled over and the
+  // utilization is no longer accurate. Drop stale rows so the bar disappears.
+  const now = Date.now();
   const rateLimits = getAllRateLimits();
-  const fiveHour = rateLimits.find((r) => r.key === "five_hour" && r.updated_at > since);
-  const sevenDay = rateLimits.find((r) => r.key === "seven_day" && r.updated_at > since);
+  const isStale = (r: { updated_at: number; resets_at: number | null }) =>
+    r.updated_at < since || (r.resets_at !== null && r.resets_at * 1000 < now);
+  const fiveHour = rateLimits.find((r) => r.key === "five_hour" && !isStale(r));
+  const sevenDay = rateLimits.find((r) => r.key === "seven_day" && !isStale(r));
 
   return NextResponse.json({
     windowMs: WINDOW_MS,

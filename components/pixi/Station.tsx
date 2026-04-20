@@ -60,7 +60,6 @@ type Props = {
     offsetY: number,
   ) => void;
   onModuleFocus?: (officeSlug: string) => void;
-  onWarRoomClick?: (officeSlug: string) => void;
   onAgentHover?: (
     officeSlug: string,
     deskId: string,
@@ -90,7 +89,6 @@ export default function Station({
   onAgentMove,
   onModuleMove,
   onModuleFocus,
-  onWarRoomClick,
   onAgentHover,
   onAgentHoverOut,
   onAgentPositions,
@@ -112,8 +110,6 @@ export default function Station({
   onModuleMoveRef.current = onModuleMove;
   const onModuleFocusRef = useRef(onModuleFocus);
   onModuleFocusRef.current = onModuleFocus;
-  const onWarRoomClickRef = useRef(onWarRoomClick);
-  onWarRoomClickRef.current = onWarRoomClick;
   const onAgentHoverRef = useRef(onAgentHover);
   onAgentHoverRef.current = onAgentHover;
   const onAgentHoverOutRef = useRef(onAgentHoverOut);

@@ -27,7 +27,7 @@ type MeetingRow = {
  *  - "tool_approval": agent is requesting permission to use a tool (URGENT — must approve/deny)
  *  - "awaiting_input": agent is blocked on a user reply (URGENT — never auto-dismisses,
  *                      clears only when the run transitions out of awaiting_input)
- *  - "synthesis": war room synthesis finished (click → open war room tab)
+ *  - "synthesis": groupchat synthesis finished (click → open groupchat tab)
  *  - "agent_run": regular agent run finished (click → open agent chat tab)
  *
  * Dismissal for done/synthesis: POST /api/runs/[id]/ack (existing endpoint).
