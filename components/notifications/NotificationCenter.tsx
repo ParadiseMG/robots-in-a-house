@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
+import { useVisibleInterval } from "@/hooks/useVisibleInterval";
 import Tooltip from "@/components/ui/Tooltip";
 
 type SynthesisNotification = {
@@ -133,14 +134,11 @@ export default function NotificationCenter({
   const seenIdsRef = useRef<Set<string>>(new Set());
   const firstLoadRef = useRef(true);
 
-  useEffect(() => {
-    let alive = true;
-    const tick = async () => {
-      try {
-        const res = await fetch("/api/notifications");
-        if (!res.ok) return;
-        const j = (await res.json()) as { notifications: Notification[] };
-        if (!alive) return;
+  useVisibleInterval(() => {
+    fetch("/api/notifications")
+      .then((r) => r.ok ? r.json() as Promise<{ notifications: Notification[] }> : null)
+      .then((j) => {
+        if (!j) return;
 
         // Ping if any new notifications arrived since last tick — louder for urgent
         if (!firstLoadRef.current) {
@@ -160,7 +158,6 @@ export default function NotificationCenter({
           const aUrgent = (a.kind === "awaiting_input" || a.kind === "tool_approval") ? 0 : 1;
           const bUrgent = (b.kind === "awaiting_input" || b.kind === "tool_approval") ? 0 : 1;
           if (aUrgent !== bUrgent) return aUrgent - bUrgent;
-          // Within urgent, tool_approval comes first
           if (aUrgent === 0 && bUrgent === 0) {
             if (a.kind === "tool_approval" && b.kind !== "tool_approval") return -1;
             if (b.kind === "tool_approval" && a.kind !== "tool_approval") return 1;
@@ -168,17 +165,9 @@ export default function NotificationCenter({
           return b.at - a.at;
         });
         setNotifs(sorted);
-      } catch {
-        // ignore
-      }
-    };
-    void tick();
-    const id = setInterval(tick, POLL_MS);
-    return () => {
-      alive = false;
-      clearInterval(id);
-    };
-  }, []);
+      })
+      .catch(() => {});
+  }, POLL_MS);
 
   const dismiss = async (runId: string) => {
     // Optimistic

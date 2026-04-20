@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
+import { useVisibleInterval } from "@/hooks/useVisibleInterval";
 import Tooltip from "@/components/ui/Tooltip";
 
 type ErrorEntry = {
@@ -64,35 +65,20 @@ export default function ErrorLog({ officeNames, onOpenAgent, activeOfficeSlug, a
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const prevCountRef = useRef(0);
 
-  useEffect(() => {
-    let alive = true;
-    const tick = async () => {
-      try {
-        const res = await fetch("/api/errors?limit=30");
-        if (!res.ok) return;
-        const j = (await res.json()) as {
-          errors: ErrorEntry[];
-          unacknowledgedCount: number;
-        };
-        if (!alive) return;
+  useVisibleInterval(() => {
+    fetch("/api/errors?limit=30")
+      .then((r) => r.ok ? r.json() as Promise<{ errors: ErrorEntry[]; unacknowledgedCount: number }> : null)
+      .then((j) => {
+        if (!j) return;
         setErrors(j.errors);
         setCount(j.unacknowledgedCount);
-        // Auto-expand on new errors
         if (j.unacknowledgedCount > prevCountRef.current && prevCountRef.current > 0) {
           setCollapsed(false);
         }
         prevCountRef.current = j.unacknowledgedCount;
-      } catch {
-        // ignore
-      }
-    };
-    void tick();
-    const id = setInterval(tick, POLL_MS);
-    return () => {
-      alive = false;
-      clearInterval(id);
-    };
-  }, []);
+      })
+      .catch(() => {});
+  }, POLL_MS);
 
   const dismiss = async (id: string) => {
     setErrors((prev) => prev.filter((e) => e.id !== id));

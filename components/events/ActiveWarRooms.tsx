@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useVisibleInterval } from "@/hooks/useVisibleInterval";
 
 type AgentStatus = { agentId: string; status: string };
 
@@ -34,35 +35,36 @@ function statusDot(status: string): string {
 
 export default function ActiveWarRooms({ agentNames, officeNames, officeAccents, onOpen }: Props) {
   const [meetings, setMeetings] = useState<WarRoomSummary[]>([]);
+  const [collapsed, setCollapsed] = useState(false);
 
-  useEffect(() => {
-    let alive = true;
-    const tick = async () => {
-      try {
-        const res = await fetch("/api/war-room?status=recent");
-        if (!res.ok) return;
-        const j = (await res.json()) as { meetings: WarRoomSummary[] };
-        if (alive) setMeetings(j.meetings);
-      } catch {
-        // ignore
-      }
-    };
-    void tick();
-    const id = setInterval(tick, POLL_MS);
-    return () => {
-      alive = false;
-      clearInterval(id);
-    };
-  }, []);
+  useVisibleInterval(() => {
+    fetch("/api/war-room?status=recent")
+      .then((r) => r.ok ? r.json() as Promise<{ meetings: WarRoomSummary[] }> : null)
+      .then((j) => { if (j) setMeetings(j.meetings); })
+      .catch(() => {});
+  }, POLL_MS);
 
   if (meetings.length === 0) return null;
 
   return (
     <div className="flex flex-col gap-1">
-      <div className="px-2 font-mono text-[9px] uppercase tracking-widest text-white/30">
+      <button
+        type="button"
+        onClick={() => setCollapsed((c) => !c)}
+        className="group flex items-center gap-1 px-2 font-mono text-[9px] uppercase tracking-widest text-white/30 hover:text-white/50 transition-colors"
+      >
+        <span
+          className="inline-block transition-transform duration-200"
+          style={{ transform: collapsed ? "rotate(-90deg)" : "rotate(0deg)" }}
+        >
+          &#9662;
+        </span>
         war rooms
-      </div>
-      {meetings.map((m) => {
+        {collapsed && (
+          <span className="ml-1 tabular-nums text-white/20">({meetings.length})</span>
+        )}
+      </button>
+      {!collapsed && meetings.map((m) => {
         const accent = officeAccents.get(m.officeSlug) ?? "#10b981";
         const officeName = officeNames.get(m.officeSlug) ?? m.officeSlug;
         const isActive = m.status === "running";

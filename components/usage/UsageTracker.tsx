@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useVisibleInterval } from "@/hooks/useVisibleInterval";
 
 type RateLimitWindow = {
   utilization: number;
@@ -75,25 +76,12 @@ function UsageBar({
 export default function UsageTracker() {
   const [usage, setUsage] = useState<Usage | null>(null);
 
-  useEffect(() => {
-    let alive = true;
-    const fetchIt = async () => {
-      try {
-        const res = await fetch("/api/usage", { cache: "no-store" });
-        if (!res.ok) return;
-        const json = (await res.json()) as Usage;
-        if (alive) setUsage(json);
-      } catch {
-        // ignore
-      }
-    };
-    fetchIt();
-    const id = setInterval(fetchIt, POLL_MS);
-    return () => {
-      alive = false;
-      clearInterval(id);
-    };
-  }, []);
+  useVisibleInterval(() => {
+    fetch("/api/usage", { cache: "no-store" })
+      .then((r) => r.ok ? r.json() as Promise<Usage> : null)
+      .then((json) => { if (json) setUsage(json); })
+      .catch(() => {});
+  }, POLL_MS);
 
   if (!usage) return null;
 

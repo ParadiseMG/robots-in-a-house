@@ -8,6 +8,7 @@ import type {
 } from "@/lib/office-types";
 import Station from "@/components/pixi/Station";
 import type { Task } from "@/components/tray/TaskTray";
+import { useVisibleInterval } from "@/hooks/useVisibleInterval";
 import PromptBar from "@/components/prompt-bar/PromptBar";
 import CommandPalette from "@/components/palette/CommandPalette";
 import UsageTracker from "@/components/usage/UsageTracker";
@@ -359,11 +360,7 @@ function HomeInner() {
     }
   }, [order]);
 
-  useEffect(() => {
-    void refetchRoster();
-    const id = setInterval(refetchRoster, ROSTER_POLL_MS);
-    return () => clearInterval(id);
-  }, [refetchRoster]);
+  useVisibleInterval(() => { void refetchRoster(); }, ROSTER_POLL_MS, [refetchRoster]);
 
   const busyDeskIds = useMemo(() => {
     const s = new Set<string>();
@@ -508,7 +505,7 @@ function HomeInner() {
       }
     }
     return m;
-  }, []);
+  }, [offices, order]);
 
   const runByDesk = useMemo(() => {
     const m = new Map<string, string | null>();
@@ -775,21 +772,46 @@ function HomeInner() {
     [],
   );
 
+  const handleModuleMove = useCallback(
+    async (officeSlug: string, offsetX: number, offsetY: number) => {
+      try {
+        const res = await fetch("/api/modules/move", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ officeSlug, offsetX, offsetY }),
+        });
+        if (!res.ok) {
+          const err = (await res.json().catch(() => ({}))) as {
+            error?: string;
+          };
+          console.error("module move failed:", err.error ?? res.status);
+        }
+      } catch (e) {
+        console.error("module move network error:", e);
+      }
+    },
+    [],
+  );
+
   const officeContainerRef = useRef<HTMLDivElement | null>(null);
   const sidebarOffice = offices[sidebarSlug] ?? offices[order[0]];
 
-  const allAgentsForDock = useMemo(() => {
+  const allAgentsWithSlug = useMemo(() => {
     return order.flatMap((slug) =>
-      (offices[slug]?.agents ?? []).map((a) => ({
-        id: a.id,
-        name: a.name,
-        role: a.role,
-        deskId: a.deskId,
-        isReal: a.isReal,
-        officeSlug: slug,
-      })),
+      (offices[slug]?.agents ?? []).map((a) => ({ ...a, officeSlug: slug })),
     );
   }, [offices, order]);
+
+  const allAgentsForDock = useMemo(() => {
+    return allAgentsWithSlug.map((a) => ({
+      id: a.id,
+      name: a.name,
+      role: a.role,
+      deskId: a.deskId,
+      isReal: a.isReal,
+      officeSlug: a.officeSlug,
+    }));
+  }, [allAgentsWithSlug]);
 
   // Lookup maps for ActiveWarRooms
   const agentNameMap = useMemo(() => {
@@ -1035,6 +1057,7 @@ function HomeInner() {
               onAgentClick={handleAgentClick}
               onDeskDrop={handleDeskDrop}
               onAgentMove={handleAgentMove}
+              onModuleMove={handleModuleMove}
               onModuleFocus={(slug) => focusModule(slug as string)}
               onWarRoomClick={(slug) => {
                 if (offices[slug]) {
@@ -1209,8 +1232,7 @@ function HomeInner() {
             }}
           />
           <PromptBar
-            agents={sidebarOffice.agents}
-            officeSlug={sidebarSlug}
+            agents={allAgentsWithSlug}
             onSent={({ deskId, isReal }) => {
               if (isReal) selectDesk(deskId);
               void refetchRoster();

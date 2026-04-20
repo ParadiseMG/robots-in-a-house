@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useDockTabs, type DockTab } from "@/hooks/useDockTabs";
 import Tooltip from "@/components/ui/Tooltip";
+import { useVisibleInterval } from "@/hooks/useVisibleInterval";
 
 type AgentStatus = { agentId: string; status: string };
 type WarRoomSummary = {
@@ -21,25 +22,19 @@ function aggregateWarRoomStatus(agentStatuses: AgentStatus[]): string {
 
 function useWarRoomStatuses(): ReadonlyMap<string, string> {
   const [statusMap, setStatusMap] = useState<ReadonlyMap<string, string>>(new Map());
-  useEffect(() => {
-    let alive = true;
-    const tick = async () => {
-      try {
-        const res = await fetch("/api/war-room?status=recent", { cache: "no-store" });
-        if (!res.ok) return;
-        const j = (await res.json()) as { meetings: WarRoomSummary[] };
-        if (!alive) return;
+  useVisibleInterval(() => {
+    fetch("/api/war-room?status=recent", { cache: "no-store" })
+      .then((r) => r.ok ? r.json() as Promise<{ meetings: WarRoomSummary[] }> : null)
+      .then((j) => {
+        if (!j) return;
         const m = new Map<string, string>();
         for (const meeting of j.meetings) {
           m.set(meeting.meetingId, aggregateWarRoomStatus(meeting.agentStatuses));
         }
         setStatusMap(m);
-      } catch { /* ignore */ }
-    };
-    void tick();
-    const id = setInterval(tick, 3000);
-    return () => { alive = false; clearInterval(id); };
-  }, []);
+      })
+      .catch(() => {});
+  }, 3000);
   return statusMap;
 }
 
