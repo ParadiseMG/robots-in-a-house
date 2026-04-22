@@ -786,27 +786,36 @@ export default function HeadsView({ heads, pinnedIds, hiddenIds, allAgents, tabO
     setSelectedIds(new Set());
   }, []);
 
-  // Status flash — track previous statuses, flash on change
+  // Status flash — track previous statuses, persist until card is clicked
   const prevStatusRef = useRef<Map<string, string | null>>(new Map());
   const [flashingIds, setFlashingIds] = useState<Map<string, "done" | "error" | "awaiting_input">>(new Map());
   useEffect(() => {
     const prev = prevStatusRef.current;
-    const newFlashes = new Map<string, "done" | "error" | "awaiting_input">();
+    let changed = false;
+    const next = new Map(flashingIds);
     for (const a of allAgents) {
       const old = prev.get(a.id);
       if (old !== undefined && old !== a.status) {
-        if (a.status === "done") newFlashes.set(a.id, "done");
-        else if (a.status === "error") newFlashes.set(a.id, "error");
-        else if (a.status === "awaiting_input") newFlashes.set(a.id, "awaiting_input");
+        if (a.status === "done") { next.set(a.id, "done"); changed = true; }
+        else if (a.status === "error") { next.set(a.id, "error"); changed = true; }
+        else if (a.status === "awaiting_input") { next.set(a.id, "awaiting_input"); changed = true; }
+        // If agent starts working again, clear its flash
+        else if (a.status === "running" || a.status === "starting") {
+          if (next.has(a.id)) { next.delete(a.id); changed = true; }
+        }
       }
       prev.set(a.id, a.status);
     }
-    if (newFlashes.size > 0) {
-      setFlashingIds(newFlashes);
-      const timer = setTimeout(() => setFlashingIds(new Map()), 2500);
-      return () => clearTimeout(timer);
-    }
-  }, [allAgents]);
+    if (changed) setFlashingIds(next);
+  }, [allAgents]); // eslint-disable-line react-hooks/exhaustive-deps
+  const dismissFlash = useCallback((id: string) => {
+    setFlashingIds((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Map(prev);
+      next.delete(id);
+      return next;
+    });
+  }, []);
 
   // Expand-in-place — track expanded cards and their last messages
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
@@ -1178,7 +1187,7 @@ export default function HeadsView({ heads, pinnedIds, hiddenIds, allAgents, tabO
       <AgentCard
         agent={agent}
         tier={effectiveTier}
-        onChat={() => onChat(agent)}
+        onChat={() => { dismissFlash(agent.id); onChat(agent); }}
         onRemove={() => onUnpin(agent.id)}
         onPin={() => pinnedSet.has(agent.id) ? onUnpin(agent.id) : onPin(agent.id)}
         isPinned={pinnedSet.has(agent.id)}

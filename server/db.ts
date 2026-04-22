@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
-import { mkdirSync, readFileSync, existsSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import type { OfficeConfig } from "../lib/office-types.js";
+import { loadOfficeConfig } from "../lib/config-loader";
 
 const DB_DIR = join(process.cwd(), "data");
 const DB_PATH = join(DB_DIR, "robots.db");
@@ -80,25 +80,6 @@ function migrate(d: Database.Database) {
     );
     CREATE INDEX IF NOT EXISTS idx_resets_agent ON session_resets(office_slug, agent_id, reset_at);
 
-    CREATE TABLE IF NOT EXISTS meetings (
-      id TEXT PRIMARY KEY,
-      office_slug TEXT NOT NULL,
-      task_id TEXT NOT NULL REFERENCES tasks(id),
-      convened_by TEXT NOT NULL,
-      prompt TEXT NOT NULL,
-      convened_at INTEGER NOT NULL,
-      target_rounds INTEGER NOT NULL DEFAULT 1,
-      synthesis_run_id TEXT
-    );
-    CREATE INDEX IF NOT EXISTS idx_meetings_office ON meetings(office_slug, convened_at);
-
-    CREATE TABLE IF NOT EXISTS meeting_attendees (
-      meeting_id TEXT NOT NULL REFERENCES meetings(id),
-      agent_id TEXT NOT NULL,
-      assignment_id TEXT NOT NULL REFERENCES assignments(id),
-      PRIMARY KEY (meeting_id, agent_id)
-    );
-    CREATE INDEX IF NOT EXISTS idx_meeting_attendees_assignment ON meeting_attendees(assignment_id);
 
     CREATE TABLE IF NOT EXISTS groupchats (
       id TEXT PRIMARY KEY,
@@ -123,14 +104,6 @@ function migrate(d: Database.Database) {
     );
     CREATE INDEX IF NOT EXISTS idx_groupchat_members_assignment ON groupchat_members(assignment_id);
 
-    CREATE TABLE IF NOT EXISTS groupchat_history (
-      id TEXT PRIMARY KEY,
-      groupchat_id TEXT NOT NULL REFERENCES groupchats(id),
-      topic TEXT NOT NULL,
-      outcome TEXT,
-      created_at INTEGER NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_groupchat_history ON groupchat_history(groupchat_id, created_at);
 
     CREATE TABLE IF NOT EXISTS groupchat_user_messages (
       id TEXT PRIMARY KEY,
@@ -225,16 +198,24 @@ function migrate(d: Database.Database) {
     "CREATE INDEX IF NOT EXISTS idx_runs_delegated_by ON agent_runs(delegated_by_agent_id, status)",
   );
 
-  // Idempotent column additions for meetings (pre-existing DBs)
-  const mcols = (
-    d.prepare("PRAGMA table_info(meetings)").all() as Array<{ name: string }>
+  // Idempotent column additions for groupchat_members
+  const gcMemCols = (
+    d.prepare("PRAGMA table_info(groupchat_members)").all() as Array<{ name: string }>
   ).map((r) => r.name);
-  if (!mcols.includes("target_rounds")) {
-    d.exec("ALTER TABLE meetings ADD COLUMN target_rounds INTEGER NOT NULL DEFAULT 1");
-  }
-  if (!mcols.includes("synthesis_run_id")) {
-    d.exec("ALTER TABLE meetings ADD COLUMN synthesis_run_id TEXT");
-  }
+  if (!gcMemCols.includes("dropped"))
+    d.exec("ALTER TABLE groupchat_members ADD COLUMN dropped INTEGER NOT NULL DEFAULT 0");
+  if (!gcMemCols.includes("dropped_at"))
+    d.exec("ALTER TABLE groupchat_members ADD COLUMN dropped_at INTEGER");
+  if (!gcMemCols.includes("drop_reason"))
+    d.exec("ALTER TABLE groupchat_members ADD COLUMN drop_reason TEXT");
+
+  // Drop legacy meetings system tables (replaced by groupchats)
+  d.exec("DROP TABLE IF EXISTS meeting_attendees");
+  d.exec("DROP TABLE IF EXISTS meetings");
+
+  // Drop truly unused tables (0 rows, no code references)
+  d.exec("DROP TABLE IF EXISTS groupchat_messages");
+  d.exec("DROP TABLE IF EXISTS groupchat_history");
 }
 
 export function upsertRateLimit(info: {
@@ -332,22 +313,10 @@ function seedIfEmpty(d: Database.Database) {
 }
 
 // ---- Helpers for config lookups (not persisted — offices are config-driven) ----
-// Read fresh from disk each call so newly-created agents are visible without a
-// server restart. Fall back to the bundled import if the file read fails.
-
-function loadOffice(officeSlug: string): OfficeConfig | null {
-  try {
-    const filePath = join(process.cwd(), "config", `${officeSlug}.office.json`);
-    if (!existsSync(filePath)) return null;
-    const raw = readFileSync(filePath, "utf-8");
-    return JSON.parse(raw) as OfficeConfig;
-  } catch {
-    return null;
-  }
-}
+// Uses cached loadOfficeConfig from config-loader (invalidated by fs.watch).
 
 export function getAgent(officeSlug: string, agentId: string) {
-  const office = loadOffice(officeSlug);
+  const office = loadOfficeConfig(officeSlug);
   if (!office) return null;
   const agent = office.agents.find((a) => a.id === agentId);
   if (!agent) return null;
@@ -355,7 +324,7 @@ export function getAgent(officeSlug: string, agentId: string) {
 }
 
 export function getDeskForAgent(officeSlug: string, agentId: string) {
-  const office = loadOffice(officeSlug);
+  const office = loadOfficeConfig(officeSlug);
   if (!office) return null;
   const agent = office.agents.find((a) => a.id === agentId);
   if (!agent) return null;

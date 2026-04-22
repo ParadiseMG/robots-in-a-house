@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
-import { db, getAgent } from "@/server/db";
+import { db, getAgent, insertGroupchatMessage, markGroupchatMessagesDelivered } from "@/server/db";
 
 export const dynamic = "force-dynamic";
 
 const RUNNER_URL = process.env.RUNNER_URL ?? "http://127.0.0.1:3100";
 
 const SETTLED = new Set(["done", "error"]);
+const CONSECUTIVE_ERROR_LIMIT = 2;
 
-type MemberRow = { agent_id: string; office_slug: string; assignment_id: string };
+type MemberRow = { agent_id: string; office_slug: string; assignment_id: string; dropped: number };
 type GroupchatRow = { id: string; task_id: string; convened_by: string; prompt: string; convened_at: number };
 type RunRow = { id: string; status: string; session_id: string | null };
 type EventRow = { payload: string };
@@ -27,6 +28,16 @@ function getLatestAssistantText(runId: string, d: ReturnType<typeof db>): string
   } catch {
     return "(no reply)";
   }
+}
+
+/** Count how many of the most recent runs ended in error (consecutive, from tail). */
+function consecutiveErrors(runs: RunRow[]): number {
+  let count = 0;
+  for (let i = runs.length - 1; i >= 0; i--) {
+    if (runs[i].status === "error") count++;
+    else break;
+  }
+  return count;
 }
 
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
@@ -53,7 +64,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   d.prepare("UPDATE groupchats SET status = 'active' WHERE id = ? AND status = 'idle'").run(groupchatId);
 
   const memberRows = d
-    .prepare("SELECT agent_id, office_slug, assignment_id FROM groupchat_members WHERE groupchat_id = ?")
+    .prepare("SELECT agent_id, office_slug, assignment_id, dropped FROM groupchat_members WHERE groupchat_id = ?")
     .all(groupchatId) as MemberRow[];
 
   const memberData = memberRows.map((row) => {
@@ -65,11 +76,14 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       )
       .all(row.assignment_id) as RunRow[];
     const latestRun = runs.at(-1);
-    return { agentId: row.agent_id, officeSlug: row.office_slug, assignmentId: row.assignment_id, runs, latestRun };
+    return { agentId: row.agent_id, officeSlug: row.office_slug, assignmentId: row.assignment_id, runs, latestRun, dropped: !!row.dropped };
   });
 
-  // 409 if any member has no settled latest run (unless they have no runs yet — persistent idle)
-  const unsettled = memberData.filter(
+  // Only consider active (non-dropped) members for settlement check
+  const activeMembers = memberData.filter((m) => !m.dropped);
+
+  // 409 if any active member has no settled latest run (unless they have no runs yet)
+  const unsettled = activeMembers.filter(
     (a) => a.latestRun && !SETTLED.has(a.latestRun.status),
   );
   if (unsettled.length > 0) {
@@ -77,6 +91,25 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       { error: `round not settled — ${unsettled.length} member(s) still running`, unsettledAgents: unsettled.map((a) => a.agentId) },
       { status: 409 },
     );
+  }
+
+  // Auto-drop: check for consecutive errors on active members
+  const newlyDropped: string[] = [];
+  for (const mem of activeMembers) {
+    if (consecutiveErrors(mem.runs) >= CONSECUTIVE_ERROR_LIMIT) {
+      d.prepare(
+        "UPDATE groupchat_members SET dropped = 1, dropped_at = ?, drop_reason = ? WHERE groupchat_id = ? AND agent_id = ?",
+      ).run(Date.now(), `${CONSECUTIVE_ERROR_LIMIT} consecutive errors`, groupchatId, mem.agentId);
+      mem.dropped = true;
+      newlyDropped.push(mem.agentId);
+    }
+  }
+
+  // Recalculate active members after drops
+  const dispatchMembers = memberData.filter((m) => !m.dropped);
+
+  if (dispatchMembers.length === 0) {
+    return NextResponse.json({ error: "all members have been dropped due to errors" }, { status: 422 });
   }
 
   const newRound = (Math.max(...memberData.map((a) => a.runs.length), 0)) + 1;
@@ -99,12 +132,12 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     }
   }
 
-  // Build peer texts for cross-talk prompt
+  // Build peer texts for cross-talk prompt (include all members for context, even dropped)
   const peerTexts = new Map<string, { name: string; role: string; text: string }>();
   for (const mem of memberData) {
     if (!mem.latestRun) continue;
     const agent = getAgent(mem.officeSlug, mem.agentId);
-    const text = getLatestAssistantText(mem.latestRun.id, d);
+    const text = mem.dropped ? "(dropped from groupchat)" : getLatestAssistantText(mem.latestRun.id, d);
     peerTexts.set(mem.agentId, {
       name: agent?.name ?? mem.agentId,
       role: agent?.role ?? "",
@@ -112,17 +145,27 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     });
   }
 
-  // Combine inline humanMessage (from round body) + queued user messages
+  // If Connor sent a message with the round request, store it as a user message
+  // so it shows up in the timeline like any other message
+  let inlineMessageId: string | null = null;
+  if (humanMessage) {
+    inlineMessageId = insertGroupchatMessage(groupchatId, humanMessage);
+    // Mark it as delivered in this round immediately
+    markGroupchatMessagesDelivered([inlineMessageId], newRound);
+  }
+
+  // Combine inline humanMessage + queued user messages
   const allHumanMessages: string[] = [];
   if (humanMessage) allHumanMessages.push(humanMessage);
   for (const msg of undeliveredMsgs) {
     allHumanMessages.push(msg.message);
   }
 
-  const runResults: Array<{ agentId: string; officeSlug: string; assignmentId: string; runId: string | null }> = [];
+  const runResults: Array<{ agentId: string; officeSlug: string; assignmentId: string; runId: string | null; dropped?: boolean }> = [];
 
+  // Dispatch only to active members
   await Promise.all(
-    memberData.map(async (mem) => {
+    dispatchMembers.map(async (mem) => {
       const peers = [...peerTexts.entries()]
         .filter(([id]) => id !== mem.agentId)
         .map(([, p]) => `### ${p.name} (${p.role})\n${p.text}`)
@@ -163,5 +206,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     }),
   );
 
-  return NextResponse.json({ round: newRound, runs: runResults });
+  // Include dropped agents in response for visibility
+  for (const mem of memberData.filter((m) => m.dropped)) {
+    runResults.push({ agentId: mem.agentId, officeSlug: mem.officeSlug, assignmentId: mem.assignmentId, runId: null, dropped: true });
+  }
+
+  return NextResponse.json({ round: newRound, runs: runResults, droppedThisRound: newlyDropped });
 }

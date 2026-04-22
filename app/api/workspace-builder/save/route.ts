@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { OfficeConfig } from "@/lib/office-types";
+import { invalidateOfficeCache } from "@/lib/config-loader";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +26,7 @@ export async function POST(req: Request) {
     const filename = `${safe}.office.json`;
     const outPath = path.join(process.cwd(), "config", filename);
     await fs.writeFile(outPath, JSON.stringify(config, null, 2));
+    invalidateOfficeCache(safe);
 
     // Create agent workspace directories with CLAUDE.md + MEMORY.md templates
     for (const agent of config.agents) {

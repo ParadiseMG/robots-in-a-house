@@ -21,6 +21,8 @@ type Member = {
   runStatus: string;
   tailSnippet: string | null;
   runs: MemberRun[];
+  dropped?: boolean;
+  dropReason?: string | null;
 };
 
 type Synthesis = {
@@ -73,8 +75,7 @@ type Props = {
   allOffices: OfficeConfig[];
 };
 
-const POLL_MS = 1500;
-const TIMELINE_POLL_MS = 2000;
+import { GROUPCHAT_STATE_POLL_MS, GROUPCHAT_TIMELINE_POLL_MS } from "@/lib/polling-constants";
 
 function statusColor(runStatus: string): string {
   if (runStatus === "done") return "#34d399";
@@ -111,7 +112,7 @@ function ConversationView({
   timeline: TimelineEntry[];
   agentLookup: Map<string, { name: string; role: string; officeSlug: string; officeName: string }>;
   allOffices: OfficeConfig[];
-  onSendMessage: (text: string) => Promise<void>;
+  onSendMessage: (text: string, force?: boolean) => Promise<void>;
   onNextRound: (message?: string) => Promise<void>;
   onPin: () => void;
   onClose: () => void;
@@ -137,17 +138,19 @@ function ConversationView({
   const roundSettled =
     gc.currentRound > 0 && gc.currentRound === gc.roundsCompleted;
 
+  const agentsRunning = gc.status === "running" && !roundSettled;
+
   // Connor drives every round — can advance when the current round is settled
   const canAdvanceRound =
     roundSettled && !crossTalking && !synthesizing && gc.status !== "idle";
 
   // Send a user message (always available)
-  const handleSend = useCallback(async () => {
+  const handleSend = useCallback(async (force?: boolean) => {
     const text = inputText.trim();
     if (!text) return;
     setSending(true);
     try {
-      await onSendMessage(text);
+      await onSendMessage(text, force);
       setInputText("");
     } finally {
       setSending(false);
@@ -207,9 +210,9 @@ function ConversationView({
               return (
                 <div
                   key={mem.agentId}
-                  className="h-2 w-2 rounded-full"
-                  style={{ backgroundColor: statusColor(mem.runStatus) }}
-                  title={`${meta?.name ?? mem.agentId}: ${mem.runStatus}`}
+                  className={`h-2 w-2 rounded-full${mem.dropped ? " opacity-30 line-through" : ""}`}
+                  style={{ backgroundColor: mem.dropped ? "#71717a" : statusColor(mem.runStatus) }}
+                  title={`${meta?.name ?? mem.agentId}: ${mem.dropped ? "dropped" : mem.runStatus}`}
                 />
               );
             })}
@@ -257,6 +260,24 @@ function ConversationView({
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-2">
         <div className="flex flex-col gap-2">
           {timeline.map((entry, i) => {
+            // Round divider: insert before the first agent entry of a new round
+            let roundDivider: React.ReactNode = null;
+            if (entry.type === "agent") {
+              const prevEntry = timeline[i - 1];
+              const prevRound = prevEntry?.type === "agent" ? prevEntry.round : 0;
+              if (entry.round > prevRound) {
+                roundDivider = (
+                  <div key={`rd-${entry.round}`} className="flex items-center gap-2 py-2">
+                    <div className="flex-1 border-t border-white/8" />
+                    <span className="font-mono text-[9px] text-white/20 shrink-0">
+                      Round {entry.round}
+                    </span>
+                    <div className="flex-1 border-t border-white/8" />
+                  </div>
+                );
+              }
+            }
+
             if (entry.type === "system") {
               return (
                 <div key={`sys-${i}`} className="py-1 text-center font-mono text-[10px] text-white/30">
@@ -267,13 +288,13 @@ function ConversationView({
 
             if (entry.type === "user") {
               return (
-                <div key={entry.messageId} className="flex justify-end">
+                <div key={entry.messageId} className="flex flex-col items-end">
                   <div className="max-w-[85%]">
                     <div className="flex items-baseline justify-end gap-2">
                       <span className="font-mono text-[9px] text-white/30">
                         {relativeTime(entry.ts)}
                       </span>
-                      <span className="text-[11px] font-medium text-blue-400">Connor</span>
+                      <span className="text-[11px] font-medium text-blue-400">You</span>
                     </div>
                     <div className="mt-0.5 rounded-lg rounded-tr-sm border border-blue-500/30 bg-blue-950/40 px-3 py-2 text-[12px] leading-snug text-zinc-100">
                       {entry.text}
@@ -292,40 +313,40 @@ function ConversationView({
             const accent = getOfficeAccent(entry.officeSlug);
             const isRunning = entry.status === "running" || entry.status === "starting";
             return (
-              <div key={`${entry.runId}-${entry.round}`} className="flex">
-                <div className="max-w-[85%]">
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-[11px] font-medium" style={{ color: accent }}>
-                      {entry.agentName}
-                    </span>
-                    <span className="font-mono text-[9px] text-white/25">
-                      {entry.agentRole}
-                    </span>
-                    <span className="font-mono text-[9px] text-white/20">
-                      R{entry.round}
-                    </span>
-                    <span className="font-mono text-[9px] text-white/30">
-                      {relativeTime(entry.ts)}
-                    </span>
-                  </div>
-                  <div
-                    className="mt-0.5 rounded-lg rounded-tl-sm border px-3 py-2 text-[12px] leading-snug text-zinc-200"
-                    style={{
-                      borderColor: isRunning ? accent + "40" : "rgba(255,255,255,0.07)",
-                      backgroundColor: isRunning ? accent + "08" : "rgba(255,255,255,0.03)",
-                    }}
-                  >
-                    {entry.text ?? (
-                      <span className="text-zinc-500">
-                        {isRunning ? (
-                          <span className="animate-pulse">thinking...</span>
-                        ) : entry.status === "error" ? (
-                          "error"
-                        ) : (
-                          "waiting..."
-                        )}
+              <div key={`${entry.runId}-${entry.round}`}>
+                {roundDivider}
+                <div className="flex">
+                  <div className="max-w-[85%]">
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-[11px] font-medium" style={{ color: accent }}>
+                        {entry.agentName}
                       </span>
-                    )}
+                      <span className="font-mono text-[9px] text-white/25">
+                        {entry.agentRole}
+                      </span>
+                      <span className="font-mono text-[9px] text-white/30">
+                        {relativeTime(entry.ts)}
+                      </span>
+                    </div>
+                    <div
+                      className="mt-0.5 rounded-lg rounded-tl-sm border px-3 py-2 text-[12px] leading-snug text-zinc-200"
+                      style={{
+                        borderColor: isRunning ? accent + "40" : "rgba(255,255,255,0.07)",
+                        backgroundColor: isRunning ? accent + "08" : "rgba(255,255,255,0.03)",
+                      }}
+                    >
+                      {entry.text ?? (
+                        <span className="text-zinc-500">
+                          {isRunning ? (
+                            <span className="animate-pulse">thinking...</span>
+                          ) : entry.status === "error" ? (
+                            "error"
+                          ) : (
+                            "waiting..."
+                          )}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -372,6 +393,19 @@ function ConversationView({
             >
               {sending ? "..." : "send"}
             </button>
+            {/* Force send: interrupts running agents and kicks off new round */}
+            {agentsRunning && inputText.trim() && (
+              <button
+                type="button"
+                onClick={() => void handleSend(true)}
+                disabled={sending}
+                className="rounded border px-2 py-1 font-mono text-[10px] uppercase tracking-wider transition disabled:cursor-not-allowed disabled:opacity-30"
+                style={{ borderColor: "#ef4444" + "99", color: "#ef4444" }}
+                title="Force send — interrupts running agents and starts a new round with your message"
+              >
+                {sending ? "..." : "force"}
+              </button>
+            )}
             {/* Secondary: advance round */}
             {canAdvanceRound && (
               <button
@@ -553,9 +587,9 @@ export default function GroupchatTab({ tabId, allOffices }: Props) {
     }
   };
 
-  // Send a user message (available anytime)
+  // Send a user message (available anytime, force = interrupt running agents)
   const sendMessage = useCallback(
-    async (text: string) => {
+    async (text: string, force?: boolean) => {
       if (!gc) return;
       setError(null);
       try {
@@ -564,7 +598,7 @@ export default function GroupchatTab({ tabId, allOffices }: Props) {
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text }),
+            body: JSON.stringify({ text, force: !!force }),
           },
         );
         if (!res.ok) {
@@ -572,11 +606,22 @@ export default function GroupchatTab({ tabId, allOffices }: Props) {
           throw new Error(j.error ?? `send failed (${res.status})`);
         }
         // Immediately add to timeline for instant feedback
-        const j = (await res.json()) as { messageId: string; sentAt: number };
+        const j = (await res.json()) as { messageId: string; sentAt: number; status: string; forced?: boolean };
+        const sentAt = j.sentAt ?? Date.now();
         setTimeline((prev) => [
           ...prev,
-          { type: "user", messageId: j.messageId, text, ts: j.sentAt, deliveredInRound: null },
+          { type: "user" as const, messageId: j.messageId, text, ts: sentAt, deliveredInRound: null },
         ]);
+        // If the message triggered a new round (settled or forced), refresh gc state
+        if (j.status === "delivered") {
+          const pollRes = await fetch(
+            `/api/groupchats/${encodeURIComponent(gc.groupchatId)}`,
+          );
+          if (pollRes.ok) {
+            const updated = (await pollRes.json()) as GroupchatState;
+            setGc((prev) => (prev ? { ...prev, ...updated } : prev));
+          }
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       }
@@ -593,6 +638,21 @@ export default function GroupchatTab({ tabId, allOffices }: Props) {
       try {
         const body: Record<string, string> = {};
         if (message?.trim()) body.message = message.trim();
+
+        // Optimistic: show the message immediately
+        if (message?.trim()) {
+          setTimeline((prev) => [
+            ...prev,
+            {
+              type: "user" as const,
+              messageId: `optimistic-${Date.now()}`,
+              text: message.trim(),
+              ts: Date.now(),
+              deliveredInRound: null,
+            },
+          ]);
+        }
+
         const res = await fetch(
           `/api/groupchats/${encodeURIComponent(gc.groupchatId)}/round`,
           {
@@ -675,7 +735,7 @@ export default function GroupchatTab({ tabId, allOffices }: Props) {
     const id = setInterval(() => {
       if (gc.status === "idle") return;
       void tick();
-    }, POLL_MS);
+    }, GROUPCHAT_STATE_POLL_MS);
     return () => {
       cancelled = true;
       clearInterval(id);
@@ -700,11 +760,25 @@ export default function GroupchatTab({ tabId, allOffices }: Props) {
         if (!res.ok) return;
         const j = (await res.json()) as { timeline: TimelineEntry[] };
         if (cancelled) return;
-        setTimeline(j.timeline);
+        // Merge: keep optimistic user messages not yet in the server response
+        setTimeline((prev) => {
+          const serverUserIds = new Set(
+            j.timeline
+              .filter((e): e is Extract<TimelineEntry, { type: "user" }> => e.type === "user")
+              .map((e) => e.messageId),
+          );
+          const optimistic = prev.filter(
+            (e): e is Extract<TimelineEntry, { type: "user" }> =>
+              e.type === "user" && !serverUserIds.has(e.messageId),
+          );
+          if (optimistic.length === 0) return j.timeline;
+          // Append optimistic entries and re-sort by timestamp
+          return [...j.timeline, ...optimistic].sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0));
+        });
       } catch {}
     };
     void tick();
-    const id = setInterval(tick, TIMELINE_POLL_MS);
+    const id = setInterval(tick, GROUPCHAT_TIMELINE_POLL_MS);
     return () => {
       cancelled = true;
       clearInterval(id);

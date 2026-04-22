@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { AgentConfig, DeskConfig, OfficeConfig } from "./office-types";
-import { isValidOfficeSlug as checkSlug, listOfficeSlugs } from "./config-loader";
+import { isValidOfficeSlug as checkSlug, listOfficeSlugs, invalidateOfficeCache } from "./config-loader";
 
 export type OfficeSlug = string;
 
@@ -42,6 +42,7 @@ async function writeOffice(slug: OfficeSlug, office: OfficeConfig): Promise<void
     JSON.stringify(office, null, 2) + "\n",
     "utf-8",
   );
+  invalidateOfficeCache(slug);
 }
 
 async function listPremadeSprites(): Promise<string[]> {

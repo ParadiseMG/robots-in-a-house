@@ -1,25 +1,25 @@
 {
   "id": "ice-cream-shop",
   "name": "Ice Cream Shop",
-  "description": "Bright, cheerful storefront with counter seating. Fun and casual for a small team.",
-  "tags": ["bright", "fun", "small", "casual"],
-  "capacity": { "min": 2, "max": 5 },
+  "description": "Tiny colorful storefront. Perfect for a solo agent or a pair. The starter office.",
+  "tags": ["tiny", "colorful", "starter", "fun"],
+  "capacity": { "min": 1, "max": 3 },
   "grid": { "cols": 12, "rows": 10 },
-  "tile": { "w": 32, "h": 32 },
+  "tile": { "w": 48, "h": 48 },
   "theme": {
-    "floor": "#e8d8c0",
-    "floorAlt": "#f0e0c8",
-    "wall": "#c8a882",
-    "deskTop": "#f5e0b8",
-    "deskSide": "#d4b888",
-    "accent": "#ff8899",
-    "highlight": "#ffaabb",
-    "bg": "#f5e8d0",
+    "floor": "#e8d8c8",
+    "floorAlt": "#f0e4d4",
+    "wall": "#f5a0b0",
+    "deskTop": "#e8c8a8",
+    "deskSide": "#c8a888",
+    "accent": "#f0728a",
+    "highlight": "#ffa8b8",
+    "bg": "#f8e8e0",
     "paletteFilter": {
       "hue": 5,
       "saturation": 1.15,
-      "brightness": 1.1,
-      "contrast": 0.95
+      "brightness": 1.08,
+      "contrast": 1.0
     },
     "deskStyle": {
       "tilesheet": "basement_16x16.png",
@@ -35,14 +35,12 @@
     }
   },
   "rooms": [
-    { "id": "main", "name": "Shop Floor", "gridX": 1, "gridY": 1, "w": 10, "h": 8 }
+    { "id": "main", "name": "Shop Floor", "gridX": 1, "gridY": 1, "w": 10, "h": 7 }
   ],
   "desks": [
-    { "gridX": 6, "gridY": 3, "facing": "S", "label": "counter seat" },
-    { "gridX": 3, "gridY": 5, "facing": "S" },
-    { "gridX": 9, "gridY": 5, "facing": "S" },
-    { "gridX": 4, "gridY": 7, "facing": "S" },
-    { "gridX": 8, "gridY": 7, "facing": "S" }
+    { "gridX": 5, "gridY": 3, "facing": "S", "label": "counter center" },
+    { "gridX": 3, "gridY": 6, "facing": "S", "label": "corner booth left" },
+    { "gridX": 8, "gridY": 6, "facing": "S", "label": "corner booth right" }
   ],
   "preview": "paradise_icecream_shop_preview.png"
 }

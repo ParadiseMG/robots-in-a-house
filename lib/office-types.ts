@@ -74,7 +74,7 @@ export type RoomConfig = {
   h: number;
   groupchat?: { gridX: number; gridY: number };  // cell to render a groupchat click target
 };
-export type DeskConfig = { id: string; roomId: string; gridX: number; gridY: number; facing: "N" | "E" | "S" | "W" };
+export type DeskConfig = { id: string; roomId: string; gridX: number; gridY: number; facing: "N" | "E" | "S" | "W"; label?: string };
 export type AgentConfig = {
   id: string;
   deskId: string;

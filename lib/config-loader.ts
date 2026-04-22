@@ -5,6 +5,38 @@ import type { OfficeConfig, RoomTemplate } from "./office-types";
 const CONFIG_DIR = path.join(process.cwd(), "config");
 const TEMPLATES_DIR = path.join(CONFIG_DIR, "templates");
 
+// ─── In-memory config cache ─────────────────────────────────────────────────
+// Avoids re-reading JSON from disk on every getAgent() / loadOfficeConfig() call.
+// Invalidated by fs.watch on the config directory.
+
+const _officeCache = new Map<string, { config: OfficeConfig; mtime: number }>();
+let _watcherStarted = false;
+
+function startConfigWatcher() {
+  if (_watcherStarted) return;
+  _watcherStarted = true;
+  try {
+    fs.watch(CONFIG_DIR, { persistent: false }, (_event, filename) => {
+      if (!filename || !filename.endsWith(".office.json")) return;
+      const slug = filename.replace(".office.json", "");
+      _officeCache.delete(slug);
+    });
+  } catch {
+    // Watcher failed (e.g. CI, missing dir) — cache still works,
+    // just won't auto-invalidate. Manual writes via saveOfficeConfig
+    // or instantiateTemplate already invalidate below.
+  }
+}
+
+/** Force-invalidate a cached office config (call after writes). */
+export function invalidateOfficeCache(slug?: string) {
+  if (slug) {
+    _officeCache.delete(slug);
+  } else {
+    _officeCache.clear();
+  }
+}
+
 /**
  * Discover all office slugs by scanning config/ for *.office.json files.
  * Returns slugs sorted alphabetically.
@@ -31,16 +63,29 @@ export function isValidOfficeSlug(slug: string): boolean {
 }
 
 /**
- * Load a single office config from disk. Returns null if not found.
+ * Load a single office config from disk (cached). Returns null if not found.
+ * Cache is invalidated automatically by fs.watch or manually via invalidateOfficeCache().
  */
 export function loadOfficeConfig(slug: string): OfficeConfig | null {
+  startConfigWatcher();
+
+  const filePath = path.join(CONFIG_DIR, `${slug}.office.json`);
+
   try {
-    const raw = fs.readFileSync(
-      path.join(CONFIG_DIR, `${slug}.office.json`),
-      "utf-8",
-    );
-    return JSON.parse(raw) as OfficeConfig;
+    const stat = fs.statSync(filePath);
+    const mtime = stat.mtimeMs;
+
+    const cached = _officeCache.get(slug);
+    if (cached && cached.mtime === mtime) {
+      return cached.config;
+    }
+
+    const raw = fs.readFileSync(filePath, "utf-8");
+    const config = JSON.parse(raw) as OfficeConfig;
+    _officeCache.set(slug, { config, mtime });
+    return config;
   } catch {
+    _officeCache.delete(slug);
     return null;
   }
 }
@@ -129,6 +174,7 @@ export function instantiateTemplate(
     gridX: slot.gridX,
     gridY: slot.gridY,
     facing: slot.facing,
+    ...(slot.label ? { label: slot.label } : {}),
   }));
 
   // Build room configs (add groupchat to the first room)
@@ -161,9 +207,49 @@ export function instantiateTemplate(
     agents: [],
   };
 
-  // Write to disk
+  // Write to disk and invalidate cache
   const filePath = path.join(CONFIG_DIR, `${slug}.office.json`);
   fs.writeFileSync(filePath, JSON.stringify(office, null, 2) + "\n");
+  invalidateOfficeCache(slug);
 
   return office;
+}
+
+/**
+ * Delete an office config from disk and optionally remove from station.json.
+ * Returns the deleted config (for agent retention) or null if not found.
+ * Does NOT delete agent-workspaces directories — those are retained.
+ */
+export function deleteOffice(
+  slug: string,
+  removeFromStation = true,
+): OfficeConfig | null {
+  const config = loadOfficeConfig(slug);
+  if (!config) return null;
+
+  // Remove config file and invalidate cache
+  const filePath = path.join(CONFIG_DIR, `${slug}.office.json`);
+  try {
+    fs.unlinkSync(filePath);
+    invalidateOfficeCache(slug);
+  } catch {
+    return null;
+  }
+
+  // Remove from station.json
+  if (removeFromStation) {
+    const stationPath = path.join(CONFIG_DIR, "station.json");
+    try {
+      const raw = fs.readFileSync(stationPath, "utf-8");
+      const station = JSON.parse(raw);
+      station.modules = (station.modules || []).filter(
+        (m: { office: string }) => m.office !== slug,
+      );
+      fs.writeFileSync(stationPath, JSON.stringify(station, null, 2) + "\n");
+    } catch {
+      // station.json missing or malformed — skip
+    }
+  }
+
+  return config;
 }

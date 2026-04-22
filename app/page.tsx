@@ -62,7 +62,7 @@ function buildStation(
   return { ...base, modules };
 }
 
-const ROSTER_POLL_MS = 5_000;
+import { ROSTER_POLL_MS } from "@/lib/polling-constants";
 
 type RosterEntry = {
   agent: {
@@ -121,8 +121,16 @@ function HomeInner() {
       .then((r) => r.json())
       .then((data: { offices: Record<string, OfficeConfig>; slugs: string[]; station?: StationConfig | null }) => {
         setOffices(data.offices);
-        setOrder(data.slugs);
-        setStation(buildStation(data.slugs, data.offices, data.station));
+        // Restore saved pill order, merging in any new offices
+        const saved = (() => {
+          try { return JSON.parse(localStorage.getItem("ri-pill-order") ?? "null"); } catch { return null; }
+        })() as string[] | null;
+        const slugs = data.slugs as string[];
+        const ordered = saved
+          ? [...saved.filter((s: string) => slugs.includes(s)), ...slugs.filter((s) => !saved.includes(s))]
+          : slugs;
+        setOrder(ordered);
+        setStation(buildStation(ordered, data.offices, data.station));
         setOfficesLoaded(true);
         // Redirect to setup if no offices exist
         if (data.slugs.length === 0) {
@@ -131,6 +139,13 @@ function HomeInner() {
       })
       .catch(() => setOfficesLoaded(true));
   }, []);
+
+  // Persist pill order to localStorage
+  useEffect(() => {
+    if (order.length > 0) {
+      localStorage.setItem("ri-pill-order", JSON.stringify(order));
+    }
+  }, [order]);
 
   // The office whose sidebar + roster data is shown. Always a real slug (never null).
   const [sidebarSlug, setSidebarSlug] = useState<string>("");
@@ -172,6 +187,7 @@ function HomeInner() {
     y: number;
   } | null>(null);
   const agentPositionsRef = useRef<Map<string, { clientX: number; clientY: number }>>(new Map());
+  const pillDragIdx = useRef<number | null>(null);
 
   // Ambient stream — track active runs for non-focused agents
   const activeRuns = useMemo(() => {
@@ -895,35 +911,49 @@ function HomeInner() {
       <div className={`flex flex-1 overflow-hidden ${viewMode === "grid" ? "flex-row" : "flex-col"}`}>
           {viewMode === "grid" ? (
             /* ── Grid view: side-by-side layout ── */
-            <HeadsView
-              heads={headAgents}
-              pinnedIds={quickViewPins}
-              hiddenIds={quickViewHidden}
-              allAgents={allQuickViewAgents}
-              tabOrder={tabs.filter((t) => t.kind === "1:1" && t.agentId).map((t) => t.agentId!)}
-              onChat={(agent) => {
-                openOrFocus({
-                  id: agent.id,
-                  agentId: agent.id,
-                  deskId: agent.deskId,
-                  officeSlug: agent.officeSlug,
-                  kind: "1:1",
-                  label: agent.name,
-                });
-              }}
-              onPin={pinAgent}
-              onUnpin={unpinAgent}
-              onReorder={(fromId, toId) => {
-                reorder(fromId, toId);
-              }}
-              onSwitchView={() => {
-                setViewMode("canvas");
-                localStorage.setItem("ri-view-mode", "canvas");
-              }}
-              onSettings={() => setShowSettings((v) => !v)}
-              onOpenGroupchat={(label, groupchatId) => openGroupchat(label, groupchatId)}
-              onNewGroupchat={() => openGroupchat("New Groupchat")}
-            />
+            <div className="flex min-h-0 flex-1 flex-col">
+              <HeadsView
+                heads={headAgents}
+                pinnedIds={quickViewPins}
+                hiddenIds={quickViewHidden}
+                allAgents={allQuickViewAgents}
+                tabOrder={tabs.filter((t) => t.kind === "1:1" && t.agentId).map((t) => t.agentId!)}
+                onChat={(agent) => {
+                  openOrFocus({
+                    id: agent.id,
+                    agentId: agent.id,
+                    deskId: agent.deskId,
+                    officeSlug: agent.officeSlug,
+                    kind: "1:1",
+                    label: agent.name,
+                  });
+                }}
+                onPin={pinAgent}
+                onUnpin={unpinAgent}
+                onReorder={(fromId, toId) => {
+                  reorder(fromId, toId);
+                }}
+                onSwitchView={() => {
+                  setViewMode("canvas");
+                  localStorage.setItem("ri-view-mode", "canvas");
+                }}
+                onSettings={() => setShowSettings((v) => !v)}
+                onOpenGroupchat={(label, groupchatId) => openGroupchat(label, groupchatId)}
+                onNewGroupchat={() => openGroupchat("New Groupchat")}
+              />
+              {/* Todos — bottom of left panel, compact */}
+              <div className="max-h-48 shrink-0 space-y-1.5 overflow-y-auto border-t border-white/10 px-3 py-1.5">
+                {order.map((slug) => (
+                  <OfficeTodos
+                    key={slug}
+                    officeSlug={slug}
+                    accent={offices[slug]?.theme?.accent}
+                    label={offices[slug]?.name}
+                    defaultCollapsed
+                  />
+                ))}
+              </div>
+            </div>
           ) : (
           <>
           <main
@@ -1104,7 +1134,7 @@ function HomeInner() {
               );
             })}
 
-            {/* Office pill switcher — bottom-center of canvas */}
+            {/* Office pill switcher — bottom-center of canvas, drag to reorder */}
             <div className="pointer-events-auto absolute bottom-4 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1 rounded-full border border-white/10 bg-black/60 px-2 py-1.5 backdrop-blur-sm">
               {order.map((slug, i) => {
                 const office = offices[slug];
@@ -1116,9 +1146,38 @@ function HomeInner() {
                 return (
                   <button
                     key={slug}
+                    draggable
+                    onDragStart={(e) => {
+                      pillDragIdx.current = i;
+                      e.dataTransfer.effectAllowed = "move";
+                      // Make the drag ghost semi-transparent
+                      if (e.currentTarget) {
+                        e.currentTarget.style.opacity = "0.4";
+                      }
+                    }}
+                    onDragEnd={(e) => {
+                      pillDragIdx.current = null;
+                      if (e.currentTarget) {
+                        e.currentTarget.style.opacity = "1";
+                      }
+                    }}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = "move";
+                      const from = pillDragIdx.current;
+                      if (from === null || from === i) return;
+                      // Swap in-place
+                      setOrder((prev) => {
+                        const next = [...prev];
+                        const [moved] = next.splice(from, 1);
+                        next.splice(i, 0, moved);
+                        return next;
+                      });
+                      pillDragIdx.current = i;
+                    }}
                     onClick={() => focusModule(slug)}
                     title={`${office.name} (${i + 1})`}
-                    className="flex items-center gap-1.5 rounded-full px-3 py-1 font-mono text-[10px] uppercase tracking-wider transition-all"
+                    className="flex cursor-grab items-center gap-1.5 rounded-full px-3 py-1 font-mono text-[10px] uppercase tracking-wider transition-all active:cursor-grabbing"
                     style={
                       active
                         ? { backgroundColor: accent + "22", color: accent, borderColor: accent + "55", border: "1px solid" }
@@ -1233,6 +1292,7 @@ function HomeInner() {
                   }
                 }}
               />
+              <UsageTracker />
               <PromptBar
                 agents={allAgentsWithSlug}
                 onSent={({ deskId, isReal }) => {

@@ -5,12 +5,14 @@
  * Behaviour:
  * - Always stores the message in `groupchat_user_messages`.
  * - If all members are settled (done/error) or have no runs yet:
- *   → triggers a new round immediately, bundling all pending user messages.
- *   → marks the messages as delivered.
+ *   -> triggers a new round immediately, bundling all pending user messages.
+ *   -> marks the messages as delivered.
  * - If any member is still running:
- *   → queues the message as pending; it will be included in the next round.
+ *   -> queues the message as pending; it will be included in the next round.
+ *   -> UNLESS `force: true` is passed — then it cancels running agents and
+ *      kicks off a new round immediately.
  *
- * Body: { text: string }
+ * Body: { text: string, force?: boolean }
  * Returns: { messageId, status: "queued"|"delivered", round?, runs? }
  *
  * GET /api/groupchats/[id]/message
@@ -32,8 +34,9 @@ export const dynamic = "force-dynamic";
 
 const RUNNER_URL = process.env.RUNNER_URL ?? "http://127.0.0.1:3100";
 const SETTLED = new Set(["done", "error"]);
+const CONSECUTIVE_ERROR_LIMIT = 2;
 
-type MemberRow = { agent_id: string; office_slug: string; assignment_id: string };
+type MemberRow = { agent_id: string; office_slug: string; assignment_id: string; dropped: number };
 type GcRow = { id: string; task_id: string; convened_by: string; prompt: string; status: string };
 type RunRow = { id: string; status: string; session_id: string | null };
 type EventRow = { payload: string };
@@ -55,6 +58,15 @@ function getLatestAssistantText(runId: string, d: ReturnType<typeof db>): string
   }
 }
 
+function consecutiveErrors(runs: RunRow[]): number {
+  let count = 0;
+  for (let i = runs.length - 1; i >= 0; i--) {
+    if (runs[i].status === "error") count++;
+    else break;
+  }
+  return count;
+}
+
 // ── GET ────────────────────────────────────────────────────────────────────────
 
 export const GET = withErrorReporting(
@@ -73,11 +85,12 @@ export const POST = withErrorReporting(
   async (req: Request, ctx: { params: Promise<{ id: string }> }) => {
     const { id: groupchatId } = await ctx.params;
 
-    const body = (await req.json()) as { text?: string; message?: string };
+    const body = (await req.json()) as { text?: string; message?: string; force?: boolean };
     const text = (body.text ?? body.message ?? "").trim();
     if (!text) {
       return NextResponse.json({ error: "missing text" }, { status: 400 });
     }
+    const force = !!body.force;
 
     const d = db();
     const gc = d
@@ -88,11 +101,12 @@ export const POST = withErrorReporting(
     }
 
     // Store the message
+    const sentAt = Date.now();
     const messageId = insertGroupchatMessage(groupchatId, text);
 
     // Load member run states
     const memberRows = d
-      .prepare("SELECT agent_id, office_slug, assignment_id FROM groupchat_members WHERE groupchat_id = ?")
+      .prepare("SELECT agent_id, office_slug, assignment_id, dropped FROM groupchat_members WHERE groupchat_id = ?")
       .all(groupchatId) as MemberRow[];
 
     const memberData = memberRows.map((row) => {
@@ -101,22 +115,64 @@ export const POST = withErrorReporting(
           "SELECT id, status, session_id FROM agent_runs WHERE assignment_id = ? ORDER BY started_at ASC",
         )
         .all(row.assignment_id) as RunRow[];
-      return { ...row, runs, latestRun: runs.at(-1) ?? null };
+      return { ...row, runs, latestRun: runs.at(-1) ?? null, dropped: !!row.dropped };
     });
 
-    // If any member is still running, queue and return
-    const anyRunning = memberData.some(
+    // Filter to active members
+    const activeMembers = memberData.filter((m) => !m.dropped);
+
+    // If any active member is still running, queue (unless force)
+    const runningMembers = activeMembers.filter(
       (m) => m.latestRun !== null && !SETTLED.has(m.latestRun.status),
     );
-    if (anyRunning) {
+
+    if (runningMembers.length > 0 && !force) {
       return NextResponse.json({
         messageId,
+        sentAt,
         status: "queued",
-        note: "Agents are mid-round. Your message will be included when they finish.",
+        note: "Agents are mid-round. Your message will be included when they finish. Pass force: true to interrupt.",
       });
     }
 
-    // All settled → trigger a new round now, bundling all pending messages
+    // Force mode: mark running agents' current runs as error so we can advance
+    if (runningMembers.length > 0 && force) {
+      const now = Date.now();
+      for (const mem of runningMembers) {
+        if (mem.latestRun) {
+          d.prepare(
+            "UPDATE agent_runs SET status = 'error', error = ?, ended_at = ? WHERE id = ? AND status NOT IN ('done', 'error')",
+          ).run("force_interrupted", now, mem.latestRun.id);
+        }
+      }
+    }
+
+    // Auto-drop: check for consecutive errors on active members
+    const newlyDropped: string[] = [];
+    // Re-read run states after force interruption
+    const refreshedData = memberData.map((mem) => {
+      if (force && runningMembers.some((rm) => rm.agent_id === mem.agent_id)) {
+        const runs = d
+          .prepare("SELECT id, status, session_id FROM agent_runs WHERE assignment_id = ? ORDER BY started_at ASC")
+          .all(mem.assignment_id) as RunRow[];
+        return { ...mem, runs, latestRun: runs.at(-1) ?? null };
+      }
+      return mem;
+    });
+
+    for (const mem of refreshedData.filter((m) => !m.dropped)) {
+      if (consecutiveErrors(mem.runs) >= CONSECUTIVE_ERROR_LIMIT) {
+        d.prepare(
+          "UPDATE groupchat_members SET dropped = 1, dropped_at = ?, drop_reason = ? WHERE groupchat_id = ? AND agent_id = ?",
+        ).run(Date.now(), `${CONSECUTIVE_ERROR_LIMIT} consecutive errors`, groupchatId, mem.agent_id);
+        mem.dropped = true;
+        newlyDropped.push(mem.agent_id);
+      }
+    }
+
+    const dispatchMembers = refreshedData.filter((m) => !m.dropped);
+
+    // All settled -> trigger a new round now, bundling all pending messages
     const pending = getPendingGroupchatMessages(groupchatId);
     const combinedMessage = pending.map((m) => m.message).join("\n\n---\n\n");
 
@@ -124,19 +180,19 @@ export const POST = withErrorReporting(
     d.prepare("UPDATE groupchats SET status = 'active' WHERE id = ? AND status = 'idle'").run(groupchatId);
 
     // Compute the next round number
-    const maxRuns = memberData.reduce((max, m) => Math.max(max, m.runs.length), 0);
+    const maxRuns = refreshedData.reduce((max, m) => Math.max(max, m.runs.length), 0);
     const newRound = maxRuns + 1;
 
     // Build peer texts for cross-talk
     const peerTexts = new Map<string, { name: string; role: string; text: string }>();
-    for (const mem of memberData) {
+    for (const mem of refreshedData) {
       if (!mem.latestRun) continue;
       const agent = getAgent(mem.office_slug, mem.agent_id);
-      const text = getLatestAssistantText(mem.latestRun.id, d);
+      const latestText = mem.dropped ? "(dropped from groupchat)" : getLatestAssistantText(mem.latestRun.id, d);
       peerTexts.set(mem.agent_id, {
         name: agent?.name ?? mem.agent_id,
         role: agent?.role ?? "",
-        text,
+        text: latestText,
       });
     }
 
@@ -145,10 +201,11 @@ export const POST = withErrorReporting(
       officeSlug: string;
       assignmentId: string;
       runId: string | null;
+      dropped?: boolean;
     }> = [];
 
     await Promise.all(
-      memberData.map(async (mem) => {
+      dispatchMembers.map(async (mem) => {
         const peers = [...peerTexts.entries()]
           .filter(([id]) => id !== mem.agent_id)
           .map(([, p]) => `### ${p.name} (${p.role})\n${p.text}`)
@@ -195,6 +252,11 @@ export const POST = withErrorReporting(
       }),
     );
 
+    // Include dropped agents in response
+    for (const mem of refreshedData.filter((m) => m.dropped)) {
+      runResults.push({ agentId: mem.agent_id, officeSlug: mem.office_slug, assignmentId: mem.assignment_id, runId: null, dropped: true });
+    }
+
     // Mark all pending messages as delivered in this round
     markGroupchatMessagesDelivered(
       pending.map((m) => m.id),
@@ -203,9 +265,12 @@ export const POST = withErrorReporting(
 
     return NextResponse.json({
       messageId,
+      sentAt,
       status: "delivered",
       round: newRound,
       runs: runResults,
+      forced: force,
+      droppedThisRound: newlyDropped,
     });
   },
 );
