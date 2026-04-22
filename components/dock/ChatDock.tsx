@@ -114,7 +114,7 @@ export default function ChatDock({ agents = [], rosterEntries = [], offices = {}
       />
 
       {!collapsed && (
-        <div className="flex min-h-0 flex-1 flex-col">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <InnerDockBody
             pickerOpen={pickerOpen}
             setPickerOpen={setPickerOpen}
@@ -176,7 +176,7 @@ function InnerDockBody({
   }));
 
   return (
-    <div className="relative flex min-h-0 flex-1">
+    <div className="relative flex min-h-0 min-w-0 flex-1">
       {/* Empty state */}
       {tabs.length === 0 && !pickerOpen && (
         <div className="flex flex-1 items-center justify-center font-mono text-xs text-white/30">

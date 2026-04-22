@@ -298,7 +298,7 @@ export default function ChatTab({
 
   return (
     <div
-      className={`relative flex min-h-0 flex-1 flex-col transition-colors ${dragOver ? "bg-sky-500/5" : ""}`}
+      className={`relative flex min-h-0 min-w-0 flex-1 flex-col transition-colors ${dragOver ? "bg-sky-500/5" : ""}`}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}

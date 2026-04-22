@@ -102,10 +102,12 @@ function ConversationView({
   allOffices,
   onSendMessage,
   onNextRound,
+  onNewChat,
   onPin,
   onClose,
   crossTalking,
   synthesizing,
+  resetting,
   error,
 }: {
   gc: GroupchatState;
@@ -114,10 +116,12 @@ function ConversationView({
   allOffices: OfficeConfig[];
   onSendMessage: (text: string, force?: boolean) => Promise<void>;
   onNextRound: (message?: string) => Promise<void>;
+  onNewChat: () => Promise<void>;
   onPin: () => void;
   onClose: () => void;
   crossTalking: boolean;
   synthesizing: boolean;
+  resetting: boolean;
   error: string | null;
 }) {
   const [inputText, setInputText] = useState("");
@@ -196,7 +200,7 @@ function ConversationView({
   })();
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-white/5 px-3 py-1.5">
         <div className="flex items-center gap-2">
@@ -231,6 +235,18 @@ function ConversationView({
           >
             {progressLabel}
           </span>
+          {/* New chat — saves memory and resets sessions */}
+          {roundSettled && (
+            <button
+              type="button"
+              onClick={onNewChat}
+              disabled={resetting}
+              className="border border-white/20 px-1.5 py-0.5 font-mono text-[9px] text-white/50 transition hover:text-white/80 disabled:opacity-30"
+              title="Save conversation to memory and start fresh sessions"
+            >
+              {resetting ? "saving..." : "new chat"}
+            </button>
+          )}
           {/* Pin button */}
           {!gc.persistent && roundSettled && (
             <button
@@ -257,7 +273,7 @@ function ConversationView({
       )}
 
       {/* Timeline — conversation view */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-2">
+      <div ref={scrollRef} className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-3 py-2">
         <div className="flex flex-col gap-2">
           {timeline.map((entry, i) => {
             // Round divider: insert before the first agent entry of a new round
@@ -296,7 +312,7 @@ function ConversationView({
                       </span>
                       <span className="text-[11px] font-medium text-blue-400">You</span>
                     </div>
-                    <div className="mt-0.5 rounded-lg rounded-tr-sm border border-blue-500/30 bg-blue-950/40 px-3 py-2 text-[12px] leading-snug text-zinc-100">
+                    <div className="mt-0.5 whitespace-pre-wrap break-words rounded-lg rounded-tr-sm border border-blue-500/30 bg-blue-950/40 px-3 py-2 text-[12px] leading-snug text-zinc-100">
                       {entry.text}
                     </div>
                     {entry.deliveredInRound == null && (
@@ -329,7 +345,7 @@ function ConversationView({
                       </span>
                     </div>
                     <div
-                      className="mt-0.5 rounded-lg rounded-tl-sm border px-3 py-2 text-[12px] leading-snug text-zinc-200"
+                      className="mt-0.5 whitespace-pre-wrap break-words rounded-lg rounded-tl-sm border px-3 py-2 text-[12px] leading-snug text-zinc-200"
                       style={{
                         borderColor: isRunning ? accent + "40" : "rgba(255,255,255,0.07)",
                         backgroundColor: isRunning ? accent + "08" : "rgba(255,255,255,0.03)",
@@ -491,6 +507,7 @@ export default function GroupchatTab({ tabId, allOffices }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [crossTalking, setCrossTalking] = useState(false);
   const synthesizing = false; // synthesis removed — Connor drives rounds manually
+  const [resetting, setResetting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [gc, setGc] = useState<GroupchatState | null>(null);
   const [pinName, setPinName] = useState("");
@@ -681,6 +698,36 @@ export default function GroupchatTab({ tabId, allOffices }: Props) {
     },
     [gc],
   );
+
+  // New chat — save memory and reset sessions
+  const newChat = useCallback(async () => {
+    if (!gc || resetting) return;
+    setResetting(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/groupchats/${encodeURIComponent(gc.groupchatId)}/new-chat`,
+        { method: "POST" },
+      );
+      if (!res.ok) {
+        const j = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(j.error ?? `new-chat failed (${res.status})`);
+      }
+      // Clear timeline and refresh gc state
+      setTimeline([]);
+      const pollRes = await fetch(
+        `/api/groupchats/${encodeURIComponent(gc.groupchatId)}`,
+      );
+      if (pollRes.ok) {
+        const updated = (await pollRes.json()) as GroupchatState;
+        setGc((prev) => (prev ? { ...prev, ...updated } : prev));
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setResetting(false);
+    }
+  }, [gc, resetting]);
 
   const pinGroupchat = async () => {
     if (!gc || !pinName.trim()) return;
@@ -896,10 +943,12 @@ export default function GroupchatTab({ tabId, allOffices }: Props) {
         allOffices={allOffices}
         onSendMessage={sendMessage}
         onNextRound={crossTalk}
+        onNewChat={newChat}
         onPin={() => setShowPinInput(true)}
         onClose={closeGroupchat}
         crossTalking={crossTalking}
         synthesizing={synthesizing}
+        resetting={resetting}
         error={error}
       />
       {/* Pin dialog overlay */}
