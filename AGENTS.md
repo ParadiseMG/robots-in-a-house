@@ -90,6 +90,37 @@ If you know who'd help, pass `suggestedAgents: ["patcher", "designer"]`. Switch 
 
 Pass `urgent: true` only if the issue is blocking your current task and you need agents pulled in even if they're busy.
 
+# Unbrowse — web interaction without a browser
+
+All agents have access to **Unbrowse** via MCP. It lets you interact with websites through their hidden APIs instead of slow browser automation.
+
+## When to use it
+
+- **Researching websites** — scrape data, check competitors, monitor pricing
+- **Interacting with services** — submit forms, check statuses, pull data from dashboards
+- **Any web task** where WebFetch or WebSearch aren't enough (need login, forms, dynamic content)
+
+## Key commands (via MCP tools)
+
+- `resolve --intent "..." --domain "..."` — find a cached API skill for what you want to do. Try this first.
+- `go <url>` — open a page in a headless browser
+- `snap` — get an accessibility snapshot of the current page (shows clickable elements as `@eN` refs)
+- `click <ref>` / `fill <ref> <value>` — interact with elements by ref
+- `login --url "..."` — authenticate to a service interactively
+- `execute --skill ID --endpoint ID` — call a discovered API endpoint directly (fastest path)
+
+## Workflow
+
+1. Try `resolve` first — if a skill exists for your intent, use `execute` (50-200ms, ~200 tokens)
+2. If no skill exists, use `go` + `snap` + `click`/`fill` to browse manually
+3. After a successful manual flow, the skill gets cached for next time
+
+## When NOT to use it
+
+- Simple web searches — use `WebSearch` instead
+- Fetching a single page's content — use `WebFetch` instead
+- Unbrowse is for interactive web tasks that need clicks, forms, logins, or API discovery
+
 # If you are a Sonnet agent
 
 You are the builder. You have `Read`, `Write`, `Edit`, `Grep`, `Glob`, `Bash`. You take clear tasks from an Opus agent (or Connor) and ship them. Keep answers concise. Close every delegated task with a 1-3 sentence summary of what you did — your delegator reads that directly.

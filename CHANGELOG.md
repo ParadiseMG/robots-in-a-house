@@ -2,6 +2,30 @@
 
 All notable changes to Robots in a House.
 
+## [0.4.0] - 2026-04-27
+
+### Added
+- **Suite HQ office** — new 7th office for RunSuite product development (Suite agent, Opus, Product Director)
+- **Unbrowse MCP integration** — all agents now have web interaction tools via stdio MCP server (`npx unbrowse mcp`)
+- AGENTS.md Unbrowse documentation — usage guide for resolve, browse, snap, click, fill, execute workflows
+- RunSuite product spec captured in Einstein's ideas files (positioning, architecture, dashboard, pricing, competitive research)
+- Groupchat "new chat" — saves conversation to Switch's memory, resets sessions for fresh rounds
+- Groupchat force-send — interrupt stuck agents and deliver queued messages immediately
+- Groupchat auto-skip — agents with 2+ consecutive errors are automatically dropped from rounds
+- Dropped member tracking (dropped, dropped_at, drop_reason columns on groupchat_members)
+- Groupchat memory files at `agent-workspaces/operations/switch/groupchat-memory/`
+- Drag-to-reorder office navigation pills (persisted to localStorage)
+
+### Changed
+- Agent runner mcpServers type widened from SDK-only to `McpServerConfig` (supports stdio + SSE + HTTP servers)
+- Cleaned up 35 orphaned agent workspaces to `agent-workspaces/_archive/`
+- Updated MEMORY.md, CHANGELOG.md, and AGENTS.md with current roster, architecture, and tooling
+
+### Fixed
+- Grid view dock panel text overflow (missing `min-w-0` in flex chain)
+- Groupchat new-chat no longer resends old messages (clears user_messages on reset)
+- Agent runner guards against orphaned sessions overwriting force-interrupted status
+
 ## [0.3.1] - 2026-04-19
 
 ### Added

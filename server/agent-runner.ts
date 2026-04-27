@@ -13,7 +13,7 @@ delete process.env.CLAUDE_CODE_ENTRYPOINT;
 import { createServer } from "node:http";
 import { resolve, join } from "node:path";
 import { readFileSync, appendFileSync, existsSync, mkdirSync } from "node:fs";
-import { query, createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
+import { query, createSdkMcpServer, tool, type McpServerConfig } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import { RUNNER_APPROVAL_POLL_MS } from "../lib/polling-constants.js";
 import {
@@ -31,6 +31,7 @@ import {
   listTodos,
   createTodo,
   updateTodo,
+  pruneOldData,
   type AgentRunRow,
 } from "./db.js";
 import { reportError } from "./error-reporter.js";
@@ -1254,10 +1255,24 @@ async function runAgent(params: {
 
   const inputServer = makeInputServer(runId);
   const toolApprovalServer = makeToolApprovalServer(runId, agentId, officeSlug);
-  const extraAllowed: string[] = ["mcp__robots-input__request_input", "mcp__robots-tool-approval__request_tool_approval"];
-  const mcpServers: Record<string, ReturnType<typeof makeInputServer>> = {
+  const extraAllowed: string[] = [
+    "mcp__robots-input__request_input",
+    "mcp__robots-tool-approval__request_tool_approval",
+    // Pre-approve Claude.ai connected integrations (Notion, Gmail, Google Drive)
+    // so headless agents don't stall on permission prompts
+    "mcp__claude_ai_Notion__*",
+    "mcp__claude_ai_Gmail__*",
+    "mcp__claude_ai_Google_Drive__*",
+  ];
+  const mcpServers: Record<string, McpServerConfig> = {
     "robots-input": inputServer,
     "robots-tool-approval": toolApprovalServer,
+    // Unbrowse: lets agents interact with websites via discovered APIs instead of browser automation
+    "unbrowse": {
+      type: "stdio",
+      command: "npx",
+      args: ["unbrowse", "mcp"],
+    },
   };
   mcpServers["robots-changelog"] = makeChangelogServer(agentId, officeSlug);
   extraAllowed.push(
@@ -1324,7 +1339,7 @@ async function runAgent(params: {
       options: {
         cwd,
         allowedTools: [...(agent.allowedTools ?? []), ...extraAllowed],
-        permissionMode: "default",
+        permissionMode: "bypassPermissions",
         settingSources: ["project"],
         mcpServers,
         betas: [],
@@ -1439,6 +1454,24 @@ async function runAgent(params: {
     if (w) {
       waiters.delete(runId);
       w("");
+    }
+
+    // Clean up any pending tool approval waiters for this run.
+    // Without this, runs that error/interrupt while awaiting tool approval
+    // leak resolve callbacks (and their closures) in the Map forever.
+    const pendingApprovals = db()
+      .prepare("SELECT id FROM tool_approvals WHERE run_id = ? AND status = 'pending'")
+      .all(runId) as Array<{ id: string }>;
+    for (const { id: approvalId } of pendingApprovals) {
+      const tw = toolApprovalWaiters.get(approvalId);
+      if (tw) {
+        toolApprovalWaiters.delete(approvalId);
+        tw({ approved: false, reason: "run ended" });
+      }
+      // Mark as denied in DB so they don't show as pending in the UI
+      db()
+        .prepare("UPDATE tool_approvals SET status = 'denied', denial_reason = 'run_ended' WHERE id = ? AND status = 'pending'")
+        .run(approvalId);
     }
 
     // Drain prompt queue: if there's a queued prompt for this agent, start it now
@@ -1609,6 +1642,26 @@ mkdirSync(LOG_DIR, { recursive: true });
     console.log(`[runner] marked ${zombies.changes} run(s) as interrupted from previous process`);
   }
 }
+
+// Prune old run_events and resolved tool_approvals on startup
+{
+  const pruned = pruneOldData();
+  if (pruned.eventsDeleted > 0 || pruned.approvalsDeleted > 0) {
+    console.log(
+      `[runner] pruned ${pruned.eventsDeleted} old events, ${pruned.approvalsDeleted} old tool approvals`,
+    );
+  }
+}
+
+// Re-prune daily (24h interval)
+setInterval(() => {
+  const pruned = pruneOldData();
+  if (pruned.eventsDeleted > 0 || pruned.approvalsDeleted > 0) {
+    console.log(
+      `[runner] daily prune: ${pruned.eventsDeleted} events, ${pruned.approvalsDeleted} tool approvals`,
+    );
+  }
+}, 24 * 60 * 60 * 1000);
 
 server.listen(PORT, () => {
   console.log(`[runner] listening on :${PORT}`);

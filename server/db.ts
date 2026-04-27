@@ -1057,3 +1057,42 @@ export function markGroupchatMessagesDelivered(ids: string[], round: number): vo
   });
   tx();
 }
+
+// ── DB pruning ───────────────────────────────────────────────────────────────
+
+const PRUNE_EVENTS_AFTER_DAYS = 7;
+
+/**
+ * Delete run_events for runs that ended more than N days ago.
+ * Keeps events for active/recent runs intact. Also cleans up
+ * resolved tool_approvals older than the retention window.
+ *
+ * Call on startup and periodically (e.g. daily).
+ */
+export function pruneOldData(): { eventsDeleted: number; approvalsDeleted: number } {
+  const d = db();
+  const cutoff = Date.now() - PRUNE_EVENTS_AFTER_DAYS * 24 * 60 * 60 * 1000;
+
+  // Delete run_events for terminal runs older than cutoff
+  const eventsResult = d.prepare(`
+    DELETE FROM run_events WHERE run_id IN (
+      SELECT id FROM agent_runs
+      WHERE status IN ('done', 'error', 'interrupted')
+        AND ended_at IS NOT NULL
+        AND ended_at < ?
+    )
+  `).run(cutoff);
+
+  // Clean up resolved tool_approvals older than cutoff
+  const approvalsResult = d.prepare(`
+    DELETE FROM tool_approvals
+    WHERE status IN ('approved', 'denied')
+      AND approved_at IS NOT NULL
+      AND approved_at < ?
+  `).run(cutoff);
+
+  return {
+    eventsDeleted: eventsResult.changes,
+    approvalsDeleted: approvalsResult.changes,
+  };
+}

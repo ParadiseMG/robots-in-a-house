@@ -877,6 +877,18 @@ function HomeInner() {
       <header className="flex items-center justify-between border-b border-white/10 px-4 py-2 text-sm">
         <div className="font-mono tracking-tight">robots-in-a-house</div>
         <div className="flex items-center gap-3">
+          <Tooltip label="Restart agent runner" position="bottom">
+            <button
+              onClick={async () => {
+                try {
+                  await fetch("/api/restart-runner", { method: "POST" });
+                } catch {}
+              }}
+              className="rounded px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-white/40 transition hover:bg-white/10 hover:text-white/80"
+            >
+              restart
+            </button>
+          </Tooltip>
           <div className="flex items-center gap-1">
             <Tooltip label="Previous office" position="bottom">
               <button
